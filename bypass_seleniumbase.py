@@ -510,9 +510,9 @@ def bypass_and_get_cookies(
 if __name__ == "__main__":
     import argparse
     
-    # 配置日志
+    # 配置日志 (已修改为 Zeabur 持久化路径)
     logger.add(
-        "logs/seleniumbase_{time}.log",
+        "/app/output/logs/seleniumbase_{time}.log",
         rotation="10 MB",
         retention="7 days",
         level="DEBUG"
