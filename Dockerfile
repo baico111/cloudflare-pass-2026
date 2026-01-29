@@ -45,4 +45,4 @@ RUN pip install pyvirtualdisplay seleniumbase loguru streamlit
 
 # 5. 启动命令 (运行可视化界面)
 # 修改 CMD，让它同时启动 scheduler 和 streamlit
-CMD python scheduler.py && streamlit run app.py --server.port 8080 --server.address 0.0.0.0
+CMD python scheduler.py ; streamlit run app.py --server.port 8080 --server.address 0.0.0.0
