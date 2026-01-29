@@ -332,7 +332,7 @@ def bypass_parallel(
         try:
             print(f"[浏览器{browser_id}] 启动，代理: {proxy}")
             
-            with SB(uc=True, test=True, locale="en", proxy=proxy, headless=True, chromium_arg="--no-sandbox,--disable-dev-shm-usage") as sb:
+            with SB(uc=True, test=True, locale="en", proxy=proxy) as sb:
                 if stop_event.is_set():
                     return {"success": False, "error": "已取消"}
                 
@@ -504,7 +504,7 @@ def bypass_cloudflare(
                 except (AttributeError, ValueError):
                     pass  # Windows 不支持
             
-            with SB(uc=True, test=True, locale="en", proxy=proxy, headless=True, chromium_arg="--no-sandbox,--disable-dev-shm-usage") as sb:
+            with SB(uc=True, test=True, locale="en", proxy=proxy) as sb:
                 print(f"[*] 正在打开: {url}")
                 
                 # 使用UC模式打开页面
