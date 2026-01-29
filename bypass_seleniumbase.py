@@ -97,11 +97,12 @@ class CloudflareBypassSeleniumBase:
         # 创建 Driver 实例
         self.driver = Driver(
             uc=True,  # 启用 Undetected ChromeDriver 模式
-            headless=self.browser_config.headless,
+            headless=True,
             agent=user_agent,
             proxy=self.browser_config.proxy,
             # 启用性能日志以捕获网络请求
             enable_ws=True,
+            chromium_arg="--no-sandbox,--disable-dev-shm-usage"
         )
         
         # 设置窗口大小
