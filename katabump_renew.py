@@ -95,14 +95,22 @@ def run_auto_renew():
                 api_core_4(sb)
                 result = {"success": True}
 
-            # ---- [步骤 D] 整合成果与提交 (根据要求增强) ----
+            # ---- [步骤 D] 整合成果与提交 (精准修复可见性问题) ----
             sb.uc_gui_click_captcha()
             logger.info("验证已完成，进入 20 秒脚本启动与稳定缓冲期...")
-            sb.sleep(20) # 按照要求：给 20 秒时间给脚本起动过人机验证并稳定
+            sb.sleep(20) 
             
-            # 点击最终提交按钮：<button type="submit" class="btn btn-primary">Renew</button>
-            logger.info("执行最终 Renew 提交点击...")
-            sb.click('button[type="submit"].btn-primary')
+            # 修复：增加 wait_for_element_visible 确保按钮完全渲染并显示
+            logger.info("正在等待 Renew 提交按钮进入可见状态...")
+            try:
+                # 将等待时间从默认的 7 秒手动提升，并确保元素 visible
+                sb.wait_for_element_visible('button[type="submit"].btn-primary', timeout=30)
+                sb.click('button[type="submit"].btn-primary')
+                logger.info("执行最终 Renew 提交点击成功")
+            except Exception as e:
+                logger.warning(f"常规点击失败，尝试使用 JS 强制穿透点击: {e}")
+                sb.js_click('button[type="submit"].btn-primary') # 最后的兜底方案
+            
             sb.sleep(10) # 等待结果反馈加载
 
             # ---- [步骤 E] 结果捕获与智能通知 ----
