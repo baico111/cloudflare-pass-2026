@@ -1,137 +1,155 @@
+import streamlit as st
+import json
 import os
+import subprocess
 import time
-from datetime import datetime, timedelta
-from pathlib import Path
-import requests
-from seleniumbase import SB
-from loguru import logger
+from datetime import datetime, timedelta, timezone
 
-# ==========================================
-# 1. 严格按照仓库 API 逻辑进行函数导入 (完全不改)
-# ==========================================
-try:
-    from bypass import bypass_cloudflare as api_core_1
-    from simple_bypass import bypass_cloudflare as api_core_2
-    from simple_bypass import bypass_parallel as api_core_3
-    from bypass_seleniumbase import bypass_logic as api_core_4
-    logger.info("📡 核心 API 插件已成功挂载至主程序")
-except Exception as e:
-    logger.error(f"🚨 API 加载失败: {e}")
+# 配置文件路径
+CONFIG_FILE = "/app/output/tasks_config.json"
 
-# ==========================================
-# 2. 高科技 TGUI 功能 (仅保留最终结果发送)
-# ==========================================
-def send_tg_notification(status, message, photo_path=None):
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not (token and chat_id): return
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return [{"name": "Katabump 自动续期任务", "script": "katabump_renew.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行"}]
+
+def save_config(tasks):
+    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(tasks, f, ensure_ascii=False, indent=2)
+
+# --- 页面全局配置 ---
+st.set_page_config(page_title="矩阵自动化控制内核", layout="wide")
+
+# 自定义全中文高科技感 CSS (一个字没改)
+st.markdown("""
+    <style>
+    .main { background-color: #0b0e14; color: #00e5ff; font-family: 'Microsoft YaHei', sans-serif; }
+    .stButton>button { background: linear-gradient(45deg, #00e5ff, #0055ff); color: white; border: none; font-weight: bold; width: 100%; height: 3em; border-radius: 8px; box-shadow: 0 0 10px rgba(0,229,255,0.3); }
+    .stButton>button:hover { box-shadow: 0 0 20px #00e5ff; transform: translateY(-2px); }
+    .stExpander { border: 1px solid #00e5ff !important; background-color: #12161f !important; border-radius: 10px; }
+    .status-tag { padding: 3px 10px; border-radius: 15px; font-size: 0.8em; font-weight: bold; }
+    .active-tag { background-color: rgba(0, 255, 128, 0.2); color: #00ff80; border: 1px solid #00ff80; }
+    .status-tag.standby-tag { background-color: rgba(255, 255, 255, 0.1); color: #888; border: 1px solid #555; }
+    code { background-color: #000 !important; color: #00ff80 !important; border: 1px solid #333; }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🛡️ 矩阵自动化控制内核")
+st.caption("版本: 2026.01.29 | 核心架构: 多模式集成分流 | 语言: 简体中文")
+
+if 'tasks' not in st.session_state:
+    st.session_state.tasks = load_config()
+
+# --- 侧边栏：环境自检与终端管理 ---
+with st.sidebar:
+    st.header("⚙️ 系统环境自检")
+    chrome_ok = os.path.exists("/usr/bin/google-chrome")
+    xvfb_ok = os.path.exists("/usr/bin/Xvfb")
     
-    # 强制转换为北京时间 (UTC+8)
-    bj_time = (datetime.utcnow() + timedelta(hours=8)).strftime('%Y-%m-%d %H:%M:%S')
-    emoji = "✅" if "成功" in status else "⚠️" if "未到期" in status else "❌"
+    c1, c2 = st.columns(2)
+    c1.metric("Chrome 内核", "就绪" if chrome_ok else "缺失")
+    c2.metric("虚拟显示器", "在线" if xvfb_ok else "离线")
     
-    formatted_msg = (
-        f"{emoji} **矩阵自动化续期报告**\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"👤 **账户**: `{os.environ.get('EMAIL', 'Unknown')}`\n"
-        f"📡 **状态**: {status}\n"
-        f"📝 **详情**: {message}\n"
-        f"🕒 **北京时间**: `{bj_time}`\n"
-        f"━━━━━━━━━━━━━━━━━━"
-    )
-
-    try:
-        if photo_path and os.path.exists(photo_path):
-            with open(photo_path, 'rb') as f:
-                requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
-                              data={'chat_id': chat_id, 'caption': formatted_msg, 'parse_mode': 'Markdown'}, files={'photo': f})
-        else:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          data={'chat_id': chat_id, 'text': formatted_msg, 'parse_mode': 'Markdown'})
-    except Exception as e: logger.error(f"TG通知失败: {e}")
-
-# ==========================================
-# 3. 自动化续期主流程 (仅保留末尾通知)
-# ==========================================
-def run_auto_renew():
-    email = os.environ.get("EMAIL")
-    password = os.environ.get("PASSWORD")
-    ui_mode = os.environ.get("BYPASS_MODE", "1. 基础单次模式")
+    st.divider()
+    st.header("🧬 终端管理")
+    new_item = st.text_input("新增项目名", placeholder="输入项目识别码...")
+    if st.button("➕ 注入新进程"):
+        st.session_state.tasks.append({"name": new_item, "script": "katabump_renew.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行"})
+        save_config(st.session_state.tasks)
+        st.rerun()
     
-    login_url = "https://dashboard.katabump.com/auth/login"
-    target_url = "https://dashboard.katabump.com/servers/edit?id=177688"
-    OUTPUT_DIR = Path("/app/output")
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    st.divider()
+    st.info("💡 提示: 所有的运行截图将保存在 /app/output 目录下。")
 
-    with SB(uc=True, xvfb=True) as sb:
-        try:
-            # ---- [步骤 A] 主流程登录 ----
-            sb.uc_open_with_reconnect(login_url, 10)
-            sb.type("#email", email)
-            sb.type("#password", password)
-            sb.click("#submit") 
-            sb.sleep(6)
+# --- 任务配置区 ---
+updated_tasks = []
+st.subheader("🛰️ 任务轨道监控")
 
-            # ---- [步骤 B] 跳转至 Renew 页面 ----
-            sb.uc_open_with_reconnect(target_url, 10)
-            sb.sleep(3)
-            sb.js_click('button[data-bs-target="#renew-modal"]') 
-            sb.sleep(6)
-
-            # ---- [步骤 C] 核心：正确调用 API ----
-            current_url = sb.get_current_url()
-            logger.info(f">>> 正在按原作者逻辑调用 API: {ui_mode}")
-
-            if "1." in ui_mode:
-                result = api_core_1(current_url)
-            elif "2." in ui_mode:
-                result = api_core_2(current_url, proxy=os.environ.get("PROXY"))
-            elif "3." in ui_mode:
-                result = api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
-            elif "4." in ui_mode:
-                api_core_4(sb)
-                result = {"success": True}
-
-            # ---- [步骤 D] 整合成果与精准点击 ----
-            sb.uc_gui_click_captcha()
-            logger.info("验证已完成，进入 20 秒稳定缓冲期...")
-            sb.sleep(20) 
-            
-            # 执行最终 Renew 提交点击 (精准锁定弹窗内按钮)
-            logger.info("执行最终 Renew 提交点击...")
+for i, task in enumerate(st.session_state.tasks):
+    with st.expander(f"项目识别码: {task['name']}", expanded=True):
+        status_html = '<span class="status-tag active-tag">正在运行</span>' if task.get('active') else '<span class="status-tag standby-tag">待命状态</span>'
+        st.markdown(status_html, unsafe_allow_html=True)
+        
+        c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
+        task['active'] = c1.checkbox("激活此任务", value=task.get('active', True), key=f"active_{i}")
+        
+        mode_options = [
+            "单浏览器模式 (对应脚本: simple_bypass.py)", 
+            "SB增强模式 (对应脚本: bypass_seleniumbase.py)", 
+            "并行竞争模式 (对应脚本: bypass.py)"
+        ]
+        curr_mode = task.get('mode', mode_options[1])
+        task['mode'] = c2.selectbox("核心破解算法选择", mode_options, index=mode_options.index(curr_mode) if curr_mode in mode_options else 1, key=f"mode_{i}")
+        
+        task['email'] = c3.text_input("登录邮箱 (Email)", value=task.get('email', ''), key=f"email_{i}")
+        task['password'] = c4.text_input("登录密码 (Password)", type="password", value=task.get('password', ''), key=f"pw_{i}")
+        
+        t1, t2, t3, t4 = st.columns([1, 1, 2, 1])
+        task['freq'] = t1.number_input("同步周期 (天)", 1, 30, task.get('freq', 3), key=f"freq_{i}")
+        
+        # --- 这里的显示逻辑修正 ---
+        last = task.get('last_run', "从未运行")
+        next_date = "等待首次运行"
+        
+        # 严格判断格式，防止 katassv 导致显示崩溃
+        if last and last != "从未运行" and len(str(last)) > 10:
             try:
-                sb.wait_for_element_visible('#renew-modal button[type="submit"].btn-primary', timeout=20)
-                sb.click('#renew-modal button[type="submit"].btn-primary')
+                next_date = (datetime.strptime(str(last), "%Y-%m-%d %H:%M:%S") + timedelta(days=task['freq'])).strftime("%Y-%m-%d")
             except:
-                sb.js_click('#renew-modal button.btn-primary')
-            
-            sb.sleep(12) # 等待页面刷新处理
+                next_date = "格式异常"
+        
+        t2.markdown(f"**上次运行:**\n{last}")
+        t3.markdown(f"**下次预定:**\n{next_date}")
+        
+        pic_path = "/app/output/success_final.png"
+        if os.path.exists(pic_path):
+            st.image(pic_path, caption="最近一次 API 物理过盾存证 (2026-01-29)", use_container_width=True)
 
-            # ---- [步骤 E] 结果抓取与单次通知 ----
-            final_img = str(OUTPUT_DIR / "final_result.png")
-            sb.save_screenshot(final_img)
-            
-            page_source = sb.get_page_source()
-            
-            # 判断逻辑并发送唯一的最终通知
-            if "2026-" in page_source:
-                try:
-                    # 按照 HTML 源码精准提取到期时间：<div class="col-lg-9 col-md-8">2026-02-02</div>
-                    expiry_date = sb.get_text('div.col-lg-9.col-md-8')
-                    send_tg_notification("续期成功 ✅", f"服务器续期已生效！\n📅 **下次到期**: `{expiry_date}`", final_img)
-                except:
-                    # 备选 XPath 提取
-                    expiry_date = sb.get_text('//div[contains(text(), "Expiry")]/following-sibling::div')
-                    send_tg_notification("续期成功 ✅", f"服务器续期成功！\n📅 **下次到期**: `{expiry_date}`", final_img)
-            else:
-                send_tg_notification("未到期 ⚠️", "目前页面未刷新日期，可能尚未达到可续期时间门槛。", final_img)
+        if t4.button("🗑️ 移除任务", key=f"del_{i}"):
+            st.session_state.tasks.pop(i)
+            save_config(st.session_state.tasks)
+            st.rerun()
 
-        except Exception as e:
-            error_img = str(OUTPUT_DIR / "error.png")
-            sb.save_screenshot(error_img)
-            # 只有发生崩溃时才发送错误通知
-            send_tg_notification("执行异常 ❌", f"系统逻辑中断: `{str(e)}`", error_img)
-            raise e
+        updated_tasks.append(task)
 
-if __name__ == "__main__":
-    run_auto_renew()
+st.divider()
+bc1, bc2, bc3 = st.columns([1, 1, 1])
+if bc1.button("💾 保存配置参数"):
+    save_config(updated_tasks)
+    st.success("配置已存入持久化扇区")
+
+if bc2.button("🚀 启动全域自动化同步"):
+    log_area = st.empty()
+    with st.status("正在建立神经链接...", expanded=True) as status:
+        for task in updated_tasks:
+            if task['active']:
+                st.write(f"正在接入项目: **{task['name']}**")
+                env = os.environ.copy()
+                env["EMAIL"] = task['email']
+                env["PASSWORD"] = task['password']
+                env["BYPASS_MODE"] = task['mode']
+                env["PYTHONUNBUFFERED"] = "1"
+                
+                cmd = ["xvfb-run", "--server-args=-screen 0 1920x1080x24", "python", "katabump_renew.py"]
+                process = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                
+                full_log = ""
+                for line in process.stdout:
+                    full_log += line
+                    display_log = "\n".join(full_log.splitlines()[-20:])
+                    log_area.code(f"管理员终端@矩阵:~$ \n{display_log}")
+                
+                process.wait()
+                if process.returncode == 0:
+                    # --- 核心锁定：确保写入的是标准北京时间字符串，不给乱码机会 ---
+                    bj_tz = timezone(timedelta(hours=8))
+                    current_bj_time = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
+                    task['last_run'] = current_bj_time
+                    save_config(updated_tasks)
+                    st.success(f"项目 {task['name']} 处理成功")
+                else:
+                    st.error(f"项目 {task['name']} 运行中断")
+        
+        status.update(label="所有预定任务同步完毕", state="complete", expanded=False)
