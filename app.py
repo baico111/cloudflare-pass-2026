@@ -42,6 +42,28 @@ st.caption("版本: 2026.01.29 | 核心架构: 多模式集成分流 | 语言: �
 if 'tasks' not in st.session_state:
     st.session_state.tasks = load_config()
 
+# --- 侧边栏：环境自检与终端管理 ---
+with st.sidebar:
+    st.header("⚙️ 系统环境自检")
+    # 检测 Dockerfile 预装的关键组件
+    chrome_ok = os.path.exists("/usr/bin/google-chrome")
+    xvfb_ok = os.path.exists("/usr/bin/Xvfb")
+    
+    c1, c2 = st.columns(2)
+    c1.metric("Chrome 内核", "就绪" if chrome_ok else "缺失")
+    c2.metric("虚拟显示器", "在线" if xvfb_ok else "离线")
+    
+    st.divider()
+    st.header("🧬 终端管理")
+    new_item = st.text_input("新增项目名", placeholder="输入项目识别码...")
+    if st.button("➕ 注入新进程"):
+        st.session_state.tasks.append({"name": new_item, "script": "katabump_renew.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": None})
+        save_config(st.session_state.tasks)
+        st.rerun()
+    
+    st.divider()
+    st.info("💡 提示: 所有的运行截图将保存在 /app/output 目录下。")
+
 # --- 任务配置区 ---
 updated_tasks = []
 st.subheader("🛰️ 任务轨道监控")
@@ -56,7 +78,7 @@ for i, task in enumerate(st.session_state.tasks):
         # 1. 任务开关
         task['active'] = c1.checkbox("激活此任务", value=task.get('active', True), key=f"active_{i}")
         
-        # 2. 模式选择 (在这里明确对应脚本名称，让你看得清清楚楚)
+        # 2. 模式选择 (明确对应脚本名称)
         mode_options = [
             "单浏览器模式 (对应脚本: simple_bypass.py)", 
             "SB增强模式 (对应脚本: bypass_seleniumbase.py)", 
@@ -80,6 +102,11 @@ for i, task in enumerate(st.session_state.tasks):
         t2.markdown(f"**上次运行:**\n{last}")
         t3.markdown(f"**下次预定:**\n{next_date}")
         
+        # 存证截图展示区
+        pic_path = "/app/output/success_final.png"
+        if os.path.exists(pic_path):
+            st.image(pic_path, caption="最近一次 API 物理过盾存证 (2026-01-29)", use_container_width=True)
+
         if t4.button("🗑️ 移除任务", key=f"del_{i}"):
             st.session_state.tasks.pop(i)
             save_config(st.session_state.tasks)
@@ -105,7 +132,7 @@ if bc2.button("🚀 启动全域自动化同步"):
                 env = os.environ.copy()
                 env["EMAIL"] = task['email']
                 env["PASSWORD"] = task['password']
-                env["BYPASS_MODE"] = task['mode'] # 传递包含脚本名的完整模式字符串
+                env["BYPASS_MODE"] = task['mode']
                 env["PYTHONUNBUFFERED"] = "1"
                 
                 # 运行主流程脚本
@@ -116,7 +143,6 @@ if bc2.button("🚀 启动全域自动化同步"):
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
-                    # 只显示最新的 20 行日志
                     display_log = "\n".join(full_log.splitlines()[-20:])
                     log_area.code(f"管理员终端@矩阵:~$ \n{display_log}")
                 
@@ -129,14 +155,3 @@ if bc2.button("🚀 启动全域自动化同步"):
                     st.error(f"项目 {task['name']} 运行中断")
         
         status.update(label="所有预定任务同步完毕", state="complete", expanded=False)
-
-with st.sidebar:
-    st.header("🧬 终端管理")
-    new_item = st.text_input("新增项目名", placeholder="输入项目识别码...")
-    if st.button("➕ 注入新进程"):
-        st.session_state.tasks.append({"name": new_item, "script": "katabump_renew.py", "mode": mode_options[1], "email": "", "password": "", "freq": 3, "active": True, "last_run": None})
-        save_config(st.session_state.tasks)
-        st.rerun()
-    
-    st.divider()
-    st.info("💡 提示: 所有的运行截图将保存在 /app/output 目录下。")
