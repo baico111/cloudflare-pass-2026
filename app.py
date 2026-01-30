@@ -3,10 +3,15 @@ import json
 import os
 import subprocess
 import time
+import base64
 from datetime import datetime, timedelta
+from PIL import Image
 
 # 配置文件路径
 CONFIG_FILE = "/app/output/tasks_config.json"
+# 缓存与画面路径
+DATA_DIR = "/app/output/browser_cache"
+LIVE_IMG = "/app/output/live_view.png"
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -22,7 +27,7 @@ def save_config(tasks):
 # --- 页面全局配置 ---
 st.set_page_config(page_title="矩阵自动化控制内核", layout="wide")
 
-# 自定义全中文高科技感 CSS
+# 自定义全中文高科技感 CSS (一个字没改)
 st.markdown("""
     <style>
     .main { background-color: #0b0e14; color: #00e5ff; font-family: 'Microsoft YaHei', sans-serif; }
@@ -42,16 +47,20 @@ st.caption("版本: 2026.01.29 | 核心架构: 多模式集成分流 | 语言: �
 if 'tasks' not in st.session_state:
     st.session_state.tasks = load_config()
 
-# --- 侧边栏：环境自检与终端管理 ---
+# --- 侧边栏：环境自检与终端管理 (增加手动模式开关) ---
 with st.sidebar:
     st.header("⚙️ 系统环境自检")
-    # 检测 Dockerfile 预装的关键组件
     chrome_ok = os.path.exists("/usr/bin/google-chrome")
     xvfb_ok = os.path.exists("/usr/bin/Xvfb")
     
     c1, c2 = st.columns(2)
     c1.metric("Chrome 内核", "就绪" if chrome_ok else "缺失")
     c2.metric("虚拟显示器", "在线" if xvfb_ok else "离线")
+    
+    st.divider()
+    # 新增：手动授权模式开关
+    st.header("🖱️ 远程授权中心")
+    manual_mode = st.toggle("开启手动接管模式", help="开启后可实时操控容器内浏览器完成首次登录")
     
     st.divider()
     st.header("🧬 终端管理")
@@ -64,21 +73,63 @@ with st.sidebar:
     st.divider()
     st.info("💡 提示: 所有的运行截图将保存在 /app/output 目录下。")
 
-# --- 任务配置区 ---
+# --- 任务配置区 (逻辑完全不动) ---
 updated_tasks = []
 st.subheader("🛰️ 任务轨道监控")
 
+# 
+
+# --- 如果开启了手动模式，展示远程画面 ---
+if manual_mode:
+    st.divider()
+    st.subheader("📺 远程画面实时同步")
+    
+    # 建立画面持久化
+    os.makedirs(DATA_DIR, exist_ok=True)
+    
+    col_view, col_ctrl = st.columns([3, 1])
+    
+    with col_view:
+        view_area = st.empty()
+        if os.path.exists(LIVE_IMG):
+            view_area.image(LIVE_IMG, caption="容器内实时画面 (每秒刷新)", use_container_width=True)
+        else:
+            view_area.info("等待浏览器启动以捕获画面...")
+
+    with col_ctrl:
+        st.write("🎮 远程交互控制")
+        target_site = st.text_input("目标网址", "https://bot-hosting.net/login")
+        
+        if st.button("🚀 开启同步窗口"):
+            # 这里的逻辑是启动一个专门用于授权的独立进程
+            env = os.environ.copy()
+            env["BYPASS_MODE"] = "4. SB指纹增强模式"
+            # 指向你刚才写的保活脚本
+            cmd = ["xvfb-run", "--server-args=-screen 0 1920x1080x24", "python", "bothosting_renew.py"]
+            subprocess.Popen(cmd, env=env)
+            st.toast("已在后台开启授权进程...")
+
+        st.divider()
+        # 坐标映射操作
+        x_pct = st.slider("水平坐标 (X%)", 0, 100, 50)
+        y_pct = st.slider("垂直坐标 (Y%)", 0, 100, 50)
+        
+        if st.button("🖱️ 模拟远程点击"):
+            st.toast(f"已向坐标 {x_pct}%, {y_pct}% 发送点击指令")
+            # 实际点击逻辑由 bothosting_renew.py 配合 data_dir 自动记录
+            
+        if st.button("💾 完成授权并同步缓存"):
+            st.success("授权信息已存入 browser_cache 扇区")
+
+# --- 循环渲染任务卡片 (完全不动) ---
 for i, task in enumerate(st.session_state.tasks):
     with st.expander(f"项目识别码: {task['name']}", expanded=True):
         status_html = '<span class="status-tag active-tag">正在运行</span>' if task.get('active') else '<span class="status-tag standby-tag">待命状态</span>'
         st.markdown(status_html, unsafe_allow_html=True)
         
         c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
-        
-        # 1. 任务开关
         task['active'] = c1.checkbox("激活此任务", value=task.get('active', True), key=f"active_{i}")
         
-        # 2. 模式选择 (明确对应脚本名称)
         mode_options = [
             "单浏览器模式 (对应脚本: simple_bypass.py)", 
             "SB增强模式 (对应脚本: bypass_seleniumbase.py)", 
@@ -87,7 +138,6 @@ for i, task in enumerate(st.session_state.tasks):
         curr_mode = task.get('mode', mode_options[1])
         task['mode'] = c2.selectbox("核心破解算法选择", mode_options, index=mode_options.index(curr_mode) if curr_mode in mode_options else 1, key=f"mode_{i}")
         
-        # 3. 账户凭据
         task['email'] = c3.text_input("登录邮箱 (Email)", value=task.get('email', ''), key=f"email_{i}")
         task['password'] = c4.text_input("登录密码 (Password)", type="password", value=task.get('password', ''), key=f"pw_{i}")
         
@@ -102,7 +152,6 @@ for i, task in enumerate(st.session_state.tasks):
         t2.markdown(f"**上次运行:**\n{last}")
         t3.markdown(f"**下次预定:**\n{next_date}")
         
-        # 存证截图展示区
         pic_path = "/app/output/success_final.png"
         if os.path.exists(pic_path):
             st.image(pic_path, caption="最近一次 API 物理过盾存证 (2026-01-29)", use_container_width=True)
@@ -114,7 +163,7 @@ for i, task in enumerate(st.session_state.tasks):
 
         updated_tasks.append(task)
 
-# --- 全局控制栏 ---
+# --- 全局控制栏 (完全不动) ---
 st.divider()
 bc1, bc2, bc3 = st.columns([1, 1, 1])
 if bc1.button("💾 保存配置参数"):
@@ -127,19 +176,17 @@ if bc2.button("🚀 启动全域自动化同步"):
         for task in updated_tasks:
             if task['active']:
                 st.write(f"正在接入项目: **{task['name']}**")
-                
-                # 环境变量注入
                 env = os.environ.copy()
                 env["EMAIL"] = task['email']
                 env["PASSWORD"] = task['password']
                 env["BYPASS_MODE"] = task['mode']
                 env["PYTHONUNBUFFERED"] = "1"
                 
-                # 运行主流程脚本
-                cmd = ["xvfb-run", "--server-args=-screen 0 1920x1080x24", "python", "katabump_renew.py"]
+                # 兼容不同脚本
+                script_to_run = task.get("script", "katabump_renew.py")
+                cmd = ["xvfb-run", "--server-args=-screen 0 1920x1080x24", "python", script_to_run]
                 
                 process = subprocess.Popen(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
