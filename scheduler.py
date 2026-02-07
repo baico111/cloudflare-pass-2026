@@ -66,9 +66,9 @@ def run_scheduler():
                 env["REFRESH_INTERVAL"] = str(task.get('refresh_interval', 5))
             
             try:
-                # 5. 统一使用 xvfb 环境执行
+                # 5. 统一使用 xvfb 环境执行 (已增加 -a 修复 Xvfb 启动问题)
                 subprocess.run([
-                    "xvfb-run", "--server-args=-screen 0 1920x1080x24", 
+                    "xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", 
                     "python", script_name
                 ], env=env, check=True)
                 
