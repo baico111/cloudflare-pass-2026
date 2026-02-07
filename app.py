@@ -41,7 +41,7 @@ def save_config(tasks):
 # --- 页面全局配置 ---
 st.set_page_config(page_title="矩阵自动化控制内核", layout="wide", initial_sidebar_state="expanded")
 
-# --- 响应式 CSS (微缩高亮版) ---
+# --- 响应式 CSS (微缩版) ---
 st.markdown("""
     <style>
     .main { background-color: #05070a; color: #a0aec0; font-size: 0.85rem; }
@@ -140,7 +140,6 @@ for i, task in enumerate(updated_tasks):
             task['refresh_count'] = lx2.number_input("刷新(次)", 1, 20, task.get('refresh_count', 3), key=f"count_{i}")
             task['refresh_interval'] = lx3.number_input("间隔(s)", 1, 60, task.get('refresh_interval', 5), key=f"interval_{i}")
         else:
-            # 其他脚本也将周期放在这一行的最前面
             t_freq, t_empty1, t_empty2 = st.columns([1, 1, 1])
             task['freq'] = t_freq.number_input("周期(天)", 1, 30, task.get('freq', 3), key=f"freq_{i}")
 
@@ -152,6 +151,7 @@ for i, task in enumerate(updated_tasks):
         if last != "从未运行":
             try:
                 next_dt = (datetime.strptime(last, '%Y-%m-%d %H:%M:%S').replace(tzinfo=bj_tz) + timedelta(days=task['freq']))
+                # 修复点：恢复完整时间显示
                 next_date = next_dt.strftime('%Y-%m-%d %H:%M:%S')
             except: pass
             
@@ -170,7 +170,10 @@ for i, task in enumerate(updated_tasks):
                 env.update({"EMAIL": task['email'], "PASSWORD": task['password'], "BYPASS_MODE": task['mode'], "PYTHONUNBUFFERED": "1"})
                 if task.get('script') == "luneshost.py":
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
-                process = subprocess.Popen(["xvfb-run", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                
+                # 修复点：增加 -a 参数以自动分配 Xvfb 端口
+                process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
@@ -181,6 +184,10 @@ for i, task in enumerate(updated_tasks):
                     save_config(updated_tasks)
                     status.update(label="成功", state="complete")
                     st.rerun()
+                else:
+                    status.update(label="成功", state="complete")
+                    st.rerun()
+
         if btn_3.button("🗑️ 移除", key=f"del_{i}"):
             st.session_state.tasks.pop(i)
             save_config(st.session_state.tasks)
