@@ -46,14 +46,13 @@ RUN mkdir -p /app/output && chmod 777 /app/output
 COPY . .
 
 # 5. 安装 Python 依赖
-# 建议先安装 requirements.txt，再补充缺失库
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit requests apscheduler
 
 # 6. 预初始化 SeleniumBase (防止启动时下载慢)
 RUN sbase install chromedriver
 
-# 7. 启动命令
-# 保持你原有的逻辑：Streamlit 后台运行 + 循环执行调度器
-# 端口依然使用 Zeabur/IDX 动态分配的 $PORT
-CMD ["sh", "-c", "streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 3600; done"]
+# 7. 启动命令 (核心修复点)
+# a. 增加 rm -f /tmp/.X11-unix/X* 以清理残留的 X 锁文件，防止重启失败
+# b. 建议在 app.py 和 scheduler.py 的 xvfb-run 命令中也加上 -a 参数
+CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 3600; done"]
