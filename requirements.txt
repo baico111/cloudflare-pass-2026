@@ -1,6 +1,5 @@
 # --- 核心引擎与反检测 ---
 seleniumbase>=4.28.0    # 核心：提供 UC 模式绕过 Cloudflare
-Cloudflare
 loguru>=0.7.0           # 核心：自动化任务日志追踪
 
 # --- 自动化环境与调度 ---
