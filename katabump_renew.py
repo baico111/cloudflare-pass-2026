@@ -61,6 +61,8 @@ def run_auto_renew():
     
     # --- 核心修改：从环境变量读取动态 ID (默认为 177688) ---
     server_id = os.environ.get("SERVER_ID", "177688")
+    # --- 核心修改：读取代理变量 ---
+    proxy = os.environ.get("PROXY")
     
     login_url = "https://dashboard.katabump.com/auth/login"
     # 动态拼接目标页面 URL
@@ -69,7 +71,8 @@ def run_auto_renew():
     OUTPUT_DIR = Path("/app/output")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    with SB(uc=True, xvfb=True) as sb:
+    # 核心修改：挂载代理隧道
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
             # ---- [步骤 A] 主流程登录 ----
             sb.uc_open_with_reconnect(login_url, 10)
