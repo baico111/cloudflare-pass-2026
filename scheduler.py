@@ -62,6 +62,10 @@ def run_scheduler():
             # --- 核心注入：注入动态服务器 ID ---
             env["SERVER_ID"] = str(task.get('server_id', '177688'))
             
+            # --- 核心修改：为 Pella 注入专属续期 ID ---
+            if script_name == "pella_renew.py":
+                env["RENEW_ID"] = str(task.get('renew_id', 'Q9wFiVeMT6vw'))
+            
             # --- 核心注入：注入任务专属 SOCKS5 代理 [实现 IP 隔离] ---
             env["PROXY"] = task.get('proxy', '')
             
