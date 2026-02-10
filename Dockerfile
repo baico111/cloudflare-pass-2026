@@ -3,6 +3,8 @@ FROM python:3.10-slim
 # 1. 设置系统环境变量
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+# 可以在此处设置默认授权码
+ENV WEB_ACCESS_CODE=admin123
 
 # 2. 安装系统依赖
 RUN apt-get update -qq && apt-get install -y -qq \
@@ -40,7 +42,7 @@ RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-
 
 WORKDIR /app
 
-# 4. 创建输出目录 (必须)
+# 4. 创建输出目录 (用于持久化配置和授权文件)
 RUN mkdir -p /app/output && chmod 777 /app/output
 
 COPY . .
@@ -49,10 +51,9 @@ COPY . .
 RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit requests apscheduler
 
-# 6. 预初始化 SeleniumBase (防止启动时下载慢)
+# 6. 预初始化 SeleniumBase
 RUN sbase install chromedriver
 
-# 7. 启动命令 (核心修复点)
-# a. 增加 rm -f /tmp/.X11-unix/X* 以清理残留的 X 锁文件，防止重启失败
-# b. 建议在 app.py 和 scheduler.py 的 xvfb-run 命令中也加上 -a 参数
+# 7. 启动命令
+# 增加了清理锁文件逻辑，并同时启动 Streamlit 面板与后台调度器
 CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 3600; done"]
