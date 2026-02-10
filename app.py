@@ -29,8 +29,8 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except: pass
-    # 默认值增加 server_id
-    return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794"}]
+    # 默认值增加 server_id 和 proxy
+    return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": ""}]
 
 def save_config(tasks):
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -91,8 +91,8 @@ with st.sidebar:
     script_options = ["katabump_renew.py", "luneshost.py"]
     selected_script = st.selectbox("核心脚本", script_options)
     if st.button("➕ 注入新进程"):
-        # new_task 增加 server_id
-        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688"}
+        # new_task 增加 server_id 和 proxy
+        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688", "proxy": ""}
         if selected_script == "luneshost.py": new_task.update({"stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794"})
         st.session_state.tasks.append(new_task)
         save_config(st.session_state.tasks)
@@ -128,13 +128,14 @@ for i, task in enumerate(updated_tasks):
         head_1.markdown(status_html, unsafe_allow_html=True)
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
 
-        # c1, c2, c3 修改布局以容纳服务器 ID
-        c1, c2, c3, c4 = st.columns([1.5, 2, 2, 1])
+        # 修改布局：增加 c5 容纳代理设置
+        c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
         task['mode'] = c1.selectbox("破解算法", ["单浏览器模式 (对应脚本: simple_bypass.py)", "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "并行竞争模式 (对应脚本: bypass.py)"], key=f"mode_{i}")
         task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
         task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
-        # 新增服务器 ID 输入框
         task['server_id'] = c4.text_input("ID", value=task.get('server_id', '177688'), key=f"sid_{i}")
+        # 新增 SOCKS5 代理输入框
+        task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://user:pass@host:port")
 
         # --- 核心改动：周期行要在最前面 ---
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
@@ -172,8 +173,9 @@ for i, task in enumerate(updated_tasks):
             with st.status(f"同步中...", expanded=True) as status:
                 env = os.environ.copy()
                 env.update({"EMAIL": task['email'], "PASSWORD": task['password'], "BYPASS_MODE": task['mode'], "PYTHONUNBUFFERED": "1"})
-                # 将 SERVER_ID 注入环境变量
+                # 将 SERVER_ID 和 PROXY 注入环境变量
                 env.update({"SERVER_ID": str(task.get('server_id', '177688'))})
+                env.update({"PROXY": str(task.get('proxy', ''))})
                 if task.get('script') == "luneshost.py":
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
                 process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
