@@ -164,7 +164,9 @@ for i, task in enumerate(updated_tasks):
         # Pella 专属布局
         if task.get('script') == "pella_renew.py":
             c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.8, 1.8, 1.5, 1.5, 2])
-            task['mode'] = c1.selectbox("破解算法", mode_options, key=f"mode_{i}")
+            task['mode'] = c1.selectbox("破解算法", mode_options, 
+                                        index=mode_options.index(task.get('mode')) if task.get('mode') in mode_options else 1,
+                                        key=f"mode_{i}")
             task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
             task['password'] = c3.text_input("Gmail APP PW", type="password", value=task.get('password', ''), key=f"pw_{i}")
             task['server_id'] = c4.text_input("服务器 ID", value=task.get('server_id', 'c216766d5bbb47fc982167ec08c144b1'), key=f"sid_{i}")
@@ -172,7 +174,9 @@ for i, task in enumerate(updated_tasks):
             task['proxy'] = c6.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
         else:
             c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
-            task['mode'] = c1.selectbox("破解算法", mode_options, key=f"mode_{i}")
+            task['mode'] = c1.selectbox("破解算法", mode_options, 
+                                        index=mode_options.index(task.get('mode')) if task.get('mode') in mode_options else 1,
+                                        key=f"mode_{i}")
             task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
             task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
             task['server_id'] = c4.text_input("ID", value=task.get('server_id', '177688'), key=f"sid_{i}")
