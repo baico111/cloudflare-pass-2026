@@ -58,4 +58,5 @@ RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit re
 RUN sbase install chromedriver
 
 # 7. 启动命令 (保持原有逻辑不动，确保后台调度器运行)
-CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 1800; done"]
+# 7. 启动命令 (增加了环境变量以彻底解决 Broken pipe 和内存崩溃问题)
+CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && export QT_X11_NO_MITSHM=1 && export _CHROME_STRATEGY=nosandbox && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 1800; done"]
