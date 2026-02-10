@@ -9,19 +9,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. 严格按照面板 API 逻辑进行函数导入
-# ==========================================
-try:
-    from bypass import bypass_cloudflare as api_core_1
-    from simple_bypass import bypass_cloudflare as api_core_2
-    from simple_bypass import bypass_parallel as api_core_3
-    from bypass_seleniumbase import bypass_logic as api_core_4
-    logger.info("📡 核心 API 插件已成功挂载")
-except Exception as e:
-    logger.error(f"🚨 API 加载失败: {e}")
-
-# ==========================================
-# 2. TG 通知与 Gmail 提取 (保持你验证成功的逻辑，一个字不改)
+# 1. TG 通知功能 (保持不变)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -39,18 +27,19 @@ def send_tg_notification(status, message, photo_path=None):
             requests.post(f"https://api.telegram.org/bot{token}/sendMessage", data={'chat_id': chat_id, 'text': formatted_msg, 'parse_mode': 'Markdown'})
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
+# ==========================================
+# 2. Gmail 验证码提取 (保持不变)
+# ==========================================
 def get_pella_code(mail_address, app_password):
-    logger.info(f"📡 正在尝试连接 Gmail IMAP: {mail_address}")
+    logger.info("📡 正在连接 Gmail 抓取验证码...")
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
+        mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(mail_address, app_password)
         mail.select("inbox")
-        for i in range(12):
-            logger.info(f"🔍 邮件搜寻中 (第 {i+1}/12 次尝试)...")
-            status, messages = mail.search(None, '(FROM "Pella")')
+        for i in range(10):
+            status, messages = mail.search(None, '(FROM "Pella" UNSEEN)')
             if status == "OK" and messages[0]:
-                msg_ids = messages[0].split()
-                latest_msg_id = msg_ids[-1]
+                latest_msg_id = messages[0].split()[-1]
                 status, data = mail.fetch(latest_msg_id, "(RFC822)")
                 raw_email = data[0][1]
                 msg = email.message_from_bytes(raw_email)
@@ -63,23 +52,17 @@ def get_pella_code(mail_address, app_password):
                     content = msg.get_payload(decode=True).decode()
                 code = re.search(r'\b\d{6}\b', content)
                 if code:
-                    found_code = code.group()
-                    logger.success(f"✨ 成功提取验证码: {found_code}")
                     mail.store(latest_msg_id, '+FLAGS', '\\Seen')
-                    mail.logout()
-                    return found_code
+                    return code.group()
             time.sleep(10)
-        mail.logout()
         return None
-    except Exception as e:
-        logger.error(f"🚨 邮箱连接失败: {e}")
-        return None
+    except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程
+# 3. Pella 自动化流程 (优化时间提取)
 # ==========================================
 def run_test():
-    # 对齐环境变量名
+    # --- 配合续期项目必须修改的环境变量对接 ---
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
@@ -113,6 +96,7 @@ def run_test():
             
             def get_expiry_time_raw(sb_obj):
                 try:
+                    # 改进的 JS：遍历所有 div，只抓取包含 'expiring' 关键字的那个容器
                     js_code = """
                     var divs = document.querySelectorAll('div');
                     for (var d of divs) {
@@ -124,7 +108,10 @@ def run_test():
                     return "未找到时间文本";
                     """
                     raw_text = sb_obj.execute_script(js_code)
+                    # 清洗文本
                     clean_text = " ".join(raw_text.split())
+                    
+                    # 截取核心部分：如果是英文，截取 expiring 之后的内容
                     if "expiring in" in clean_text:
                         return clean_text.split("expiring in")[1].split(".")[0].strip()
                     return clean_text[:60]
@@ -140,7 +127,7 @@ def run_test():
                     send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 续期网站操作 (算法挂载) ---
+            # --- 第三阶段: 续期网站操作 (配合续期项目对接算法) ---
             logger.info(f"跳转至续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
@@ -152,29 +139,26 @@ def run_test():
                     if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
+            # --- 算法分支：必须改的地方以实现面板控制 ---
             sb.sleep(6)
-            current_url = sb.get_current_url()
-            logger.info(f"当前模式: {ui_mode}，执行破解算法...")
-
-            # 对齐面板 mode_options 字符串
-            if "单浏览器" in ui_mode: 
-                api_core_2(current_url, proxy=proxy)
-            elif "并行竞争" in ui_mode: 
-                api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
-            elif "SB增强" in ui_mode:
-                try:
+            try:
+                from simple_bypass import bypass_cloudflare as api_core_2
+                from simple_bypass import bypass_parallel as api_core_3
+                from bypass_seleniumbase import bypass_logic as api_core_4
+                
+                current_url = sb.get_current_url()
+                if "单浏览器" in ui_mode: api_core_2(current_url, proxy=proxy)
+                elif "并行竞争" in ui_mode: api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
+                elif "SB增强" in ui_mode:
                     cf_iframe = 'iframe[src*="cloudflare"]'
                     if sb.is_element_visible(cf_iframe):
                         sb.switch_to_frame(cf_iframe)
                         sb.click('span.mark') 
                         sb.switch_to_parent_frame()
                         sb.sleep(6)
-                    else: 
-                        api_core_4(sb)
-                except: 
-                    pass
+                    else: api_core_4(sb)
+            except: pass
 
-            # --- 第四阶段: 后续强力点击流程 (保持不变) ---
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(6):
                 if sb.is_element_visible(captcha_btn):
@@ -201,19 +185,20 @@ def run_test():
                         sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible(final_btn): break
 
-            # --- 第五阶段: 返回 Pella 验证结果 ---
+            # --- 第四阶段: 返回 Pella 验证结果 ---
             logger.info("操作完成，回访 Pella...")
             sb.sleep(5)
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10)
+            
             expiry_after = get_expiry_time_raw(sb)
-            sb.save_screenshot("/app/output/pella_final_result.png")
-            send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "/app/output/pella_final_result.png")
+            sb.save_screenshot("pella_final_result.png")
+            
+            send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "pella_final_result.png")
 
         except Exception as e:
-            error_img = "/app/output/error.png"
-            sb.save_screenshot(error_img)
-            send_tg_notification("流程异常 ❌", f"错误详情: `{str(e)}`", error_img)
+            sb.save_screenshot("error.png")
+            send_tg_notification("流程异常 ❌", f"错误详情: `{str(e)}`", "error.png")
             raise e
 
 if __name__ == "__main__":
