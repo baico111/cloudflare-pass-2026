@@ -161,7 +161,7 @@ for i, task in enumerate(updated_tasks):
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
         task['group'] = head_3.text_input("分组", value=task.get("group", "默认"), key=f"group_edit_{i}")
 
-        # Pella 专属布局：已修复算法下拉框
+        # Pella 专属布局
         if task.get('script') == "pella_renew.py":
             c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.8, 1.8, 1.5, 1.5, 2])
             task['mode'] = c1.selectbox("破解算法", mode_options, key=f"mode_{i}")
@@ -189,7 +189,7 @@ for i, task in enumerate(updated_tasks):
             t_freq, t_empty1, t_empty2 = st.columns([1, 1, 1])
             task['freq'] = t_freq.number_input("周期(天)", 1, 30, task.get('freq', 3), key=f"freq_{i}")
 
-        # --- 时间显示（带高亮） ---
+        # --- 时间显示 ---
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         t_time1, t_time2 = st.columns(2)
         last = task.get('last_run', "从未运行")
@@ -208,6 +208,7 @@ for i, task in enumerate(updated_tasks):
         if btn_1.button("💾 保存", key=f"save_{i}"):
             save_config(updated_tasks)
             st.toast(f"{task['name']} 已保存")
+            
         if btn_2.button("🚀 同步", key=f"run_{i}"):
             log_area = st.empty()
             with st.status(f"同步中...", expanded=True) as status:
@@ -218,25 +219,38 @@ for i, task in enumerate(updated_tasks):
                     "BYPASS_MODE": task['mode'], 
                     "PYTHONUNBUFFERED": "1",
                     "SERVER_ID": str(task.get('server_id', '')),
-                    "RENEW_ID": str(task.get('renew_id', '')), # 注入续期 ID
+                    "RENEW_ID": str(task.get('renew_id', '')),
                     "PROXY": str(task.get('proxy', ''))
                 })
                 if task.get('script') == "luneshost.py":
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
-                process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                
+                # 合并 stdout 和 stderr 以捕获脚本内部的 logger 报错
+                process = subprocess.Popen(
+                    ["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], 
+                    env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+                )
+                
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
-                    log_area.code("\n".join(full_log.splitlines()[-6:]))
+                    log_area.code("\n".join(full_log.splitlines()[-8:]))
+                
                 process.wait()
+                
+                # 修改后的判定逻辑：识别冷却状态
                 if process.returncode == 0:
-                    task['last_run'] = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
-                    save_config(updated_tasks)
-                    status.update(label="成功", state="complete")
-                    st.rerun()
+                    if "冷却" in full_log:
+                        status.update(label="任务处于冷却期 (未更新时间)", state="complete")
+                        st.warning("⚠️ 脚本检测到按钮仍在冷却，本次同步未更新运行记录。")
+                    else:
+                        task['last_run'] = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
+                        save_config(updated_tasks)
+                        status.update(label="成功", state="complete")
+                        st.rerun()
                 else:
                     status.update(label="失败", state="complete")
-                    st.rerun()
+                    st.error("❌ 进程执行异常，请查看上方日志。")
 
         if btn_3.button("🗑️ 移除", key=f"del_{i}"):
             st.session_state.tasks.pop(i)
