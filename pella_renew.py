@@ -79,6 +79,7 @@ def get_pella_code(mail_address, app_password):
 # 3. Pella 自动化流程
 # ==========================================
 def run_test():
+    # 对齐环境变量名
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
@@ -139,7 +140,7 @@ def run_test():
                     send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 续期网站操作 (这里完整对接三个破解算法) ---
+            # --- 第三阶段: 续期网站操作 (算法挂载) ---
             logger.info(f"跳转至续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
@@ -155,7 +156,7 @@ def run_test():
             current_url = sb.get_current_url()
             logger.info(f"当前模式: {ui_mode}，执行破解算法...")
 
-            # --- 核心：这里是你要的三个算法完整分支 ---
+            # 对齐面板 mode_options 字符串
             if "单浏览器" in ui_mode: 
                 api_core_2(current_url, proxy=proxy)
             elif "并行竞争" in ui_mode: 
@@ -169,7 +170,7 @@ def run_test():
                         sb.switch_to_parent_frame()
                         sb.sleep(6)
                     else: 
-                        api_core_4(sb) # 调用 seleniumbase 专用的 bypass 逻辑
+                        api_core_4(sb)
                 except: 
                     pass
 
