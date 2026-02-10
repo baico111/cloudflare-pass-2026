@@ -66,9 +66,12 @@ def run_auto_renew():
 
     # --- 核心修改：从环境变量获取 ID 并动态合成 URL ---
     server_id = os.environ.get("SERVER_ID", "52794")
+    # --- 核心修改：读取代理变量 ---
+    proxy = os.environ.get("PROXY")
     target_server_url = f"https://betadash.lunes.host/servers/{server_id}"
 
-    with SB(uc=True, xvfb=True) as sb:
+    # 核心修改：在 SB 启动时挂载代理隧道
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
             # 第一步：直接访问详情页，系统会自动带你去登录页
             logger.info(f"正在直接访问目标详情页: {target_server_url}")
