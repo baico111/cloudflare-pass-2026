@@ -30,6 +30,7 @@ def run_scheduler():
         
         last_run_str = task.get('last_run')
         freq = task.get('freq', 3)
+        group_name = task.get('group', '默认') # 读取分组信息
         
         # 2. 自动化执行逻辑判断
         should_run = False
@@ -50,7 +51,9 @@ def run_scheduler():
             # 3. 提取我们在 UI 上选好的 API 模式与脚本名
             selected_mode = task.get('mode', '单浏览器模式 (对应脚本: simple_bypass.py)')
             script_name = task.get('script', 'katabump_renew.py')
-            print(f"[*] [周期任务启动] 项目: {task['name']} | 脚本: {script_name} | 挂载 API: {selected_mode}")
+            
+            # 日志优化：包含分组名称
+            print(f"[*] [周期任务启动] 分组: {group_name} | 项目: {task['name']} | 脚本: {script_name} | 挂载 API: {selected_mode}")
             
             # 4. 环境变量注入
             env = os.environ.copy()
@@ -85,9 +88,9 @@ def run_scheduler():
                 # 执行成功后更新时间：确保写入的是标准北京时间字符串
                 task['last_run'] = now.strftime("%Y-%m-%d %H:%M:%S")
                 updated = True
-                print(f"[+] {task['name']} 自动同步成功。")
+                print(f"[+] [{group_name}] {task['name']} 自动同步成功。")
             except Exception as e:
-                print(f"[!] {task['name']} 自动执行失败: {e}")
+                print(f"[!] [{group_name}] {task['name']} 自动执行失败: {e}")
 
     # 6. 如果有运行记录更新，写回 JSON 文件
     if updated:
