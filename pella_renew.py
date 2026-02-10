@@ -9,19 +9,19 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. 核心 API 插件挂载 (续期项目标准逻辑)
+# 1. 严格按照面板 API 逻辑进行函数导入
 # ==========================================
 try:
     from bypass import bypass_cloudflare as api_core_1
     from simple_bypass import bypass_cloudflare as api_core_2
     from simple_bypass import bypass_parallel as api_core_3
     from bypass_seleniumbase import bypass_logic as api_core_4
-    logger.info("📡 核心 API 插件已成功挂载至 Pella 主程序")
+    logger.info("📡 核心 API 插件已成功挂载")
 except Exception as e:
     logger.error(f"🚨 API 加载失败: {e}")
 
 # ==========================================
-# 2. TG 通知功能 (完全使用你要求的格式)
+# 2. TG 通知功能 (保持不变)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -40,7 +40,7 @@ def send_tg_notification(status, message, photo_path=None):
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
-# 3. Gmail 验证码提取 (保持你要求的逻辑)
+# 2. Gmail 验证码提取 (保持不变)
 # ==========================================
 def get_pella_code(mail_address, app_password):
     logger.info("📡 正在连接 Gmail 抓取验证码...")
@@ -71,19 +71,18 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 4. Pella 自动化流程 (完全注入你要求的步骤)
+# 3. Pella 自动化流程 (优化时间提取)
 # ==========================================
 def run_test():
-    # --- 核心变量对齐面板 ---
+    # --- 变量对齐面板 ---
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
     ui_mode = os.environ.get("BYPASS_MODE", "SB增强模式")
     
-    # 动态 ID 读取
+    # 动态拼接 URL
     server_id = os.environ.get("SERVER_ID", "c216766d5bbb47fc982167ec08c144b1")
     renew_id = os.environ.get("RENEW_ID", "Q9wFiVeMT6vw")
-    
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuttlinks.com/{renew_id}"
     
@@ -137,12 +136,11 @@ def run_test():
                     send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 续期网站操作 (注入你验证成功的逻辑) ---
+            # --- 第三阶段: 续期网站操作 ---
             logger.info(f"跳转至续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
             
-            # 1. 循环处理第一个 Continue
             for i in range(5):
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
                     sb.js_click('button#submit-button[data-ref="first"]')
@@ -150,14 +148,11 @@ def run_test():
                     if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # 2. 调用核心破解算法
+            # 破解算法选择 (Kata 逻辑)
             sb.sleep(6)
-            current_url = sb.get_current_url()
-            logger.info(f"当前模式: {ui_mode}，执行破解算法...")
-            
-            if "单浏览器" in ui_mode: api_core_2(current_url, proxy=proxy)
-            elif "并行竞争" in ui_mode: api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
-            elif "SB增强" in ui_mode: 
+            if "单浏览器" in ui_mode: api_core_2(sb.get_current_url(), proxy=proxy)
+            elif "并行竞争" in ui_mode: api_core_3(url=sb.get_current_url(), proxy_file="proxy.txt", batch_size=3)
+            elif "SB增强" in ui_mode:
                 try:
                     cf_iframe = 'iframe[src*="cloudflare"]'
                     if sb.is_element_visible(cf_iframe):
@@ -165,10 +160,9 @@ def run_test():
                         sb.click('span.mark') 
                         sb.switch_to_parent_frame()
                         sb.sleep(6)
-                    else: api_core_4(sb) 
+                    else: api_core_4(sb)
                 except: pass
 
-            # 3. I am not a robot 阶段 (包含多窗口自动清理逻辑)
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(6):
                 if sb.is_element_visible(captcha_btn):
@@ -183,8 +177,6 @@ def run_test():
 
             logger.info("等待计时结束...")
             sb.sleep(18)
-            
-            # 4. 最后 Go 按钮阶段
             final_btn = 'button#submit-button[data-ref="show"]'
             for i in range(8):
                 if sb.is_element_visible(final_btn):
