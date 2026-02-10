@@ -74,7 +74,7 @@ def get_pella_code(mail_address, app_password):
 # 4. Pella 自动化续期主流程
 # ==========================================
 def run_test():
-    # --- 核心适配：从环境变量读取面板参数 ---
+    # --- 核心修改：变量名与面板环境变量对齐 ---
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
@@ -120,7 +120,7 @@ def run_test():
             expiry_before = get_expiry_time_raw(sb)
             logger.info(f"🕒 初始状态: {expiry_before}")
 
-            # --- 第三阶段: 续期网站操作 (Kata 逻辑联动) ---
+            # --- 第三阶段: 续期网站操作 (根据面板选择动态切换算法) ---
             logger.info(f"跳转至续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
@@ -133,7 +133,7 @@ def run_test():
                     if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # 2. 核心修改：根据面板选择动态调用过人机逻辑
+            # 2. 调用核心 API (与 Kata 逻辑一致)
             sb.sleep(6)
             current_url = sb.get_current_url()
             logger.info(f"当前模式: {ui_mode}，执行破解算法...")
@@ -141,7 +141,6 @@ def run_test():
             if "单浏览器" in ui_mode: api_core_2(current_url, proxy=proxy)
             elif "并行竞争" in ui_mode: api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
             elif "SB增强" in ui_mode: 
-                # 这里使用你最成功的 Kata iframe 点击逻辑
                 try:
                     cf_iframe = 'iframe[src*="cloudflare"]'
                     if sb.is_element_visible(cf_iframe):
@@ -149,10 +148,10 @@ def run_test():
                         sb.click('span.mark') 
                         sb.switch_to_parent_frame()
                         sb.sleep(6)
-                    else: api_core_4(sb) # 兜底调用 API
+                    else: api_core_4(sb)
                 except: pass
 
-            # 3. 后续强力点击流程 (保持不变)
+            # 3. 后续强力点击流程
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(6):
                 if sb.is_element_visible(captcha_btn):
