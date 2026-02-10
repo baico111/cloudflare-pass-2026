@@ -53,8 +53,6 @@ def send_tg_notification(status, message, photo_path=None):
 # ==========================================
 # 3. 自动化续期主流程 (一步到位版)
 # ==========================================
-# 直接把目标详情页定义为起始点
-target_server_url = "https://betadash.lunes.host/servers/52794"
 OUTPUT_DIR = Path("/app/output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -65,6 +63,10 @@ def run_auto_renew():
     stay_time = int(os.environ.get("STAY_TIME", 10))
     refresh_count = int(os.environ.get("REFRESH_COUNT", 3))
     refresh_interval = int(os.environ.get("REFRESH_INTERVAL", 5))
+
+    # --- 核心修改：从环境变量获取 ID 并动态合成 URL ---
+    server_id = os.environ.get("SERVER_ID", "52794")
+    target_server_url = f"https://betadash.lunes.host/servers/{server_id}"
 
     with SB(uc=True, xvfb=True) as sb:
         try:
