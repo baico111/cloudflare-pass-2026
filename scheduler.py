@@ -59,10 +59,13 @@ def run_scheduler():
             env["BYPASS_MODE"] = selected_mode 
             env["PYTHONUNBUFFERED"] = "1"
             
-            # --- 核心改动：注入动态服务器 ID ---
+            # --- 核心注入：注入动态服务器 ID ---
             env["SERVER_ID"] = str(task.get('server_id', '177688'))
             
-            # --- 核心改动：为 luneshost.py 注入专项保活变量 ---
+            # --- 核心注入：注入任务专属 SOCKS5 代理 [实现 IP 隔离] ---
+            env["PROXY"] = task.get('proxy', '')
+            
+            # --- 核心注入：为 luneshost.py 注入专项保活变量 ---
             if script_name == "luneshost.py":
                 env["STAY_TIME"] = str(task.get('stay_time', 10))
                 env["REFRESH_COUNT"] = str(task.get('refresh_count', 3))
