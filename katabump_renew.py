@@ -59,8 +59,13 @@ def run_auto_renew():
     password = os.environ.get("PASSWORD")
     ui_mode = os.environ.get("BYPASS_MODE", "1. 基础单次模式")
     
+    # --- 核心修改：从环境变量读取动态 ID (默认为 177688) ---
+    server_id = os.environ.get("SERVER_ID", "177688")
+    
     login_url = "https://dashboard.katabump.com/auth/login"
-    target_url = "https://dashboard.katabump.com/servers/edit?id=177688"
+    # 动态拼接目标页面 URL
+    target_url = f"https://dashboard.katabump.com/servers/edit?id={server_id}"
+    
     OUTPUT_DIR = Path("/app/output")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
