@@ -1,15 +1,16 @@
 # --- 核心引擎与反检测 ---
 seleniumbase>=4.28.0    # 核心：提供 UC 模式绕过 Cloudflare
-loguru                  # 核心：自动化任务日志追踪
+loguru>=0.7.0           # 核心：自动化任务日志追踪
 
 # --- 自动化环境与调度 ---
 pyvirtualdisplay        # Linux 容器内运行 Chrome 的虚拟显示支持
 apscheduler             # 建议增加：用于更稳定的定时任务调度逻辑
 
 # --- UI 面板与网络 ---
-streamlit               # 构建高科技感管理后台
+streamlit>=1.30.0       # 构建高科技感管理后台
 requests                # 用于 Telegram 消息推送及 API 调用
+imaplib2                # 补强：确保 Gmail 验证码抓取更加稳定 (可选)
 
-# --- 兼容性补充 (按需保留) ---
-# PyAutoGUI             # 除非你的 bypass 逻辑里明确用了坐标点击，否则在 headless 环境下建议移除
-# PySimpleGUI           # 你的 UI 已经全面转向 Streamlit，此库可以移除
+# --- 兼容性补充 (已按需清理) ---
+# PyAutoGUI             # 已移除：Headless 环境不兼容
+# PySimpleGUI           # 已移除：已使用 Streamlit
