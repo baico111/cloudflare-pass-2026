@@ -59,6 +59,9 @@ def run_scheduler():
             env["BYPASS_MODE"] = selected_mode 
             env["PYTHONUNBUFFERED"] = "1"
             
+            # --- 核心改动：注入动态服务器 ID ---
+            env["SERVER_ID"] = str(task.get('server_id', '177688'))
+            
             # --- 核心改动：为 luneshost.py 注入专项保活变量 ---
             if script_name == "luneshost.py":
                 env["STAY_TIME"] = str(task.get('stay_time', 10))
