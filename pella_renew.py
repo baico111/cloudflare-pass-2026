@@ -40,21 +40,31 @@ def send_tg_notification(status, message, photo_path=None):
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
-# 2. Gmail 验证码提取 (保持不变)
+# 2. Gmail 验证码提取 (逻辑加固版)
 # ==========================================
 def get_pella_code(mail_address, app_password):
-    logger.info("📡 正在连接 Gmail 抓取验证码...")
+    logger.info(f"📡 正在尝试连接 Gmail IMAP: {mail_address}")
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
+        # 使用 standard 库但增加超时处理
+        mail = imaplib.IMAP4_SSL("imap.gmail.com", 993)
         mail.login(mail_address, app_password)
         mail.select("inbox")
-        for i in range(10):
-            status, messages = mail.search(None, '(FROM "Pella" UNSEEN)')
+        
+        # 增加尝试次数到 12 次 (总计 2 分钟)，并放宽搜索条件
+        for i in range(12):
+            logger.info(f"🔍 邮件搜寻中 (第 {i+1}/12 次尝试)...")
+            
+            # 兼容性搜索：先搜 Pella 发来的邮件，不再强制要求 UNSEEN（未读）
+            status, messages = mail.search(None, '(FROM "Pella")')
+            
             if status == "OK" and messages[0]:
-                latest_msg_id = messages[0].split()[-1]
+                msg_ids = messages[0].split()
+                latest_msg_id = msg_ids[-1] # 永远取最新的那一封
+                
                 status, data = mail.fetch(latest_msg_id, "(RFC822)")
                 raw_email = data[0][1]
                 msg = email.message_from_bytes(raw_email)
+                
                 content = ""
                 if msg.is_multipart():
                     for part in msg.walk():
@@ -62,16 +72,26 @@ def get_pella_code(mail_address, app_password):
                             content = part.get_payload(decode=True).decode()
                 else:
                     content = msg.get_payload(decode=True).decode()
+                
                 code = re.search(r'\b\d{6}\b', content)
                 if code:
-                    mail.store(latest_msg_id, '+FLAGS', '\\Seen')
-                    return code.group()
+                    found_code = code.group()
+                    logger.success(f"✨ 成功提取验证码: {found_code}")
+                    mail.store(latest_msg_id, '+FLAGS', '\\Seen') # 标记为已读
+                    mail.logout()
+                    return found_code
+            
             time.sleep(10)
+        
+        logger.error("❌ 达到最大尝试次数，未找到验证码邮件")
+        mail.logout()
         return None
-    except Exception as e: return None
+    except Exception as e:
+        logger.error(f"🚨 邮箱连接/登录失败: {e}")
+        return None
 
 # ==========================================
-# 3. Pella 自动化流程 (优化时间提取)
+# 3. Pella 自动化流程
 # ==========================================
 def run_test():
     # --- 变量对齐面板 ---
@@ -98,8 +118,10 @@ def run_test():
                 time.sleep(0.1)
             sb.press_keys("#identifier-field", "\n")
             sb.sleep(5)
+            
             auth_code = get_pella_code(email_addr, app_pw)
             if not auth_code: raise Exception("验证码抓取失败")
+            
             sb.type('input[data-input-otp="true"]', auth_code)
             sb.sleep(10)
 
@@ -148,7 +170,7 @@ def run_test():
                     if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # 破解算法选择 (Kata 逻辑)
+            # 破解算法选择
             sb.sleep(6)
             if "单浏览器" in ui_mode: api_core_2(sb.get_current_url(), proxy=proxy)
             elif "并行竞争" in ui_mode: api_core_3(url=sb.get_current_url(), proxy_file="proxy.txt", batch_size=3)
