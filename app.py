@@ -91,11 +91,10 @@ with st.sidebar:
     script_options = ["katabump_renew.py", "luneshost.py", "pella_renew.py"]
     selected_script = st.selectbox("核心脚本", script_options)
     
-    # 增加分组标签功能
+    # 增加分组标签输入
     new_group = st.text_input("所属分组", value="默认")
     
     if st.button("➕ 注入新进程"):
-        # new_task 增加 server_id 和 proxy，并加入 group 字段
         new_task = {"name": new_item, "script": selected_script, "group": new_group, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688", "proxy": ""}
         if selected_script == "luneshost.py": new_task.update({"stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794"})
         if selected_script == "pella_renew.py": new_task.update({"server_id": "c216766d5bbb47fc982167ec08c144b1", "renew_id": "Q9wFiVeMT6vw"})
@@ -143,6 +142,13 @@ if st.session_state.tasks:
 updated_tasks = st.session_state.tasks
 bj_tz = timezone(timedelta(hours=8))
 
+# 统一的模式选项
+mode_options = [
+    "单浏览器模式 (对应脚本: simple_bypass.py)", 
+    "SB增强模式 (对应脚本: bypass_seleniumbase.py)", 
+    "并行竞争模式 (对应脚本: bypass.py)"
+]
+
 for i, task in enumerate(updated_tasks):
     # 仅显示被过滤的分组
     if task.get("group", "默认") not in filter_group:
@@ -155,10 +161,10 @@ for i, task in enumerate(updated_tasks):
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
         task['group'] = head_3.text_input("分组", value=task.get("group", "默认"), key=f"group_edit_{i}")
 
-        # 修改布局：增加 c5 容纳代理设置
+        # Pella 专属布局：已修复算法下拉框
         if task.get('script') == "pella_renew.py":
             c1, c2, c3, c4, c5, c6 = st.columns([1.5, 1.8, 1.8, 1.5, 1.5, 2])
-            task['mode'] = c1.selectbox("破解算法", ["SB增强模式 (对应脚本: bypass_seleniumbase.py)"], key=f"mode_{i}")
+            task['mode'] = c1.selectbox("破解算法", mode_options, key=f"mode_{i}")
             task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
             task['password'] = c3.text_input("Gmail APP PW", type="password", value=task.get('password', ''), key=f"pw_{i}")
             task['server_id'] = c4.text_input("服务器 ID", value=task.get('server_id', 'c216766d5bbb47fc982167ec08c144b1'), key=f"sid_{i}")
@@ -166,13 +172,12 @@ for i, task in enumerate(updated_tasks):
             task['proxy'] = c6.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
         else:
             c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
-            task['mode'] = c1.selectbox("破解算法", ["单浏览器模式 (对应脚本: simple_bypass.py)", "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "并行竞争模式 (对应脚本: bypass.py)"], key=f"mode_{i}")
+            task['mode'] = c1.selectbox("破解算法", mode_options, key=f"mode_{i}")
             task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
             task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
             task['server_id'] = c4.text_input("ID", value=task.get('server_id', '177688'), key=f"sid_{i}")
             task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://user:pass@host:port")
 
-        # --- 核心改动：周期行要在最前面 ---
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         if task.get('script') == "luneshost.py":
             lx_freq, lx1, lx2, lx3 = st.columns([1, 1, 1, 1])
@@ -213,7 +218,7 @@ for i, task in enumerate(updated_tasks):
                     "BYPASS_MODE": task['mode'], 
                     "PYTHONUNBUFFERED": "1",
                     "SERVER_ID": str(task.get('server_id', '')),
-                    "RENEW_ID": str(task.get('renew_id', '')),
+                    "RENEW_ID": str(task.get('renew_id', '')), # 注入续期 ID
                     "PROXY": str(task.get('proxy', ''))
                 })
                 if task.get('script') == "luneshost.py":
