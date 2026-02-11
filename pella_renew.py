@@ -9,7 +9,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. TG 通知功能 (完全保持原样)
+# 1. TG 通知功能 (保持不变)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -29,7 +29,7 @@ def send_tg_notification(status, message, photo_path=None):
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
-# 2. Gmail 提取 (完全保持原样)
+# 2. Gmail 提取 (保持不变)
 # ==========================================
 def get_pella_code(mail_address, app_password):
     logger.info("📡 正在连接 Gmail 抓取验证码...")
@@ -60,7 +60,7 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (内存极限防御版)
+# 3. Pella 自动化流程 (内存深度重置版)
 # ==========================================
 def run_test():
     email_addr = os.environ.get("EMAIL")
@@ -73,10 +73,11 @@ def run_test():
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuttlinks.com/{renew_id}"
     
-    # 物理适配：同时禁图、禁用插件、禁用GPU，最大限度节省内存
+    expiry_before = "未知"
+
+    # --- 第一阶段: 登录与检查时长 ---
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None, block_images=True) as sb:
         try:
-            # --- 第一阶段: 登录 ---
             logger.info("🚀 [面板监控] 正在打开 Pella 登录页面...")
             sb.uc_open_with_reconnect("https://www.pella.app/login", 20)
             sb.sleep(5)
@@ -95,7 +96,6 @@ def run_test():
             sb.type('input[data-input-otp="true"]', auth_code)
             sb.sleep(10)
 
-            # --- 第二阶段: 检查状态 ---
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10) 
             
@@ -110,49 +110,41 @@ def run_test():
 
             expiry_before = get_expiry_time_raw(sb)
             logger.info(f"🕒 [面板监控] 续期前时长: {expiry_before}")
-
-            # --- 第三阶段: 续期网站 (物理防崩溃：拦截广告请求) ---
-            logger.info(f"🚀 [面板监控] 正在跳转至续期站: {renew_url}")
             
-            # 物理加固：通过 CDP 协议在跳转前强制拦截常见的广告域名请求，防止内存爆炸
+            # 第一阶段结束，主动退出 SB 以释放全部物理内存
+            logger.info("🧹 [物理加固] 正在重置浏览器实例以清理内存...")
+        except Exception as e:
+            sb.save_screenshot("error_stage1.png")
+            send_tg_notification("登录异常 ❌", f"详情: `{str(e)}`", "error_stage1.png")
+            return
+
+    # --- 第二阶段: 纯净环境跳转续期页 ---
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None, block_images=True) as sb:
+        try:
+            logger.info(f"🚀 [面板监控] 使用全新实例跳转至续期站: {renew_url}")
+            
+            # 物理加固：拦截所有多媒体资源，只留文字和点击逻辑
             try:
-                sb.execute_cdp_cmd("Network.setBlockedURLs", {"urls": [
-                    "*google-analytics.com*", "*googletagservices.com*", "*googlesyndication.com*", 
-                    "*doubleclick.net*", "*adnxs.com*", "*advertising.com*", "*popads.net*", 
-                    "*.mp4", "*.m4a", "*.webm" # 拦截视频流，这是最吃内存的
-                ]})
+                sb.execute_cdp_cmd("Network.setBlockedURLs", {"urls": ["*google*", "*ads*", "*.mp4", "*.webm", "*.jpg", "*.png"]})
                 sb.execute_cdp_cmd("Network.enable", {})
-            except: pass
-
-            sb.execute_script("window.stop();")
-            
-            # 使用更短的超时，只要按钮出来就止损
-            try:
-                sb.driver.set_page_load_timeout(15) 
+                sb.driver.set_page_load_timeout(20)
                 sb.open(renew_url)
             except:
                 sb.execute_script("window.stop();")
             
             sb.sleep(5)
-            # 核心修正：在尝试获取句柄前先检查浏览器是否存活
-            try:
-                main_window = sb.driver.current_window_handle
-            except:
-                raise Exception("物理内存溢出，浏览器进程已崩溃。请尝试更换 Zeabur 区域或减少并发任务。")
+            main_window = sb.driver.current_window_handle
 
             for i in range(5):
                 logger.info(f"🖱️ [面板监控] 检测 [First] 按钮 (第 {i+1} 次)...")
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
-                    # JS 点击穿透广告层
                     sb.execute_script("document.querySelector('button#submit-button[data-ref=\"first\"]').click();")
                     sb.sleep(3)
-                    
-                    # 循环关闭所有弹窗
+                    # 物理关窗
                     if len(sb.driver.window_handles) > 1:
                         for h in sb.driver.window_handles:
                             if h != main_window:
-                                try:
-                                    sb.driver.switch_to.window(h); sb.driver.close()
+                                try: sb.driver.switch_to.window(h); sb.driver.close()
                                 except: pass
                         sb.driver.switch_to.window(main_window)
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
@@ -160,31 +152,20 @@ def run_test():
 
             # --- 算法分支 ---
             sb.sleep(6)
-            try:
-                current_url = sb.get_current_url()
-                if "并行竞争" in ui_mode:
-                    from bypass import bypass_cloudflare
-                    bypass_cloudflare(url=current_url, proxy=proxy)
-                elif "单浏览器" in ui_mode:
-                    from simple_bypass import bypass_cloudflare
-                    bypass_cloudflare(current_url, proxy=proxy)
-                elif "SB增强" in ui_mode:
-                    from bypass_seleniumbase import bypass_logic
-                    bypass_logic(sb)
-            except Exception as e:
-                logger.error(f"❌ 破解算法报错: {e}")
+            current_url = sb.get_current_url()
+            if "并行竞争" in ui_mode:
+                from bypass import bypass_cloudflare
+                bypass_cloudflare(url=current_url, proxy=proxy)
+            elif "单浏览器" in ui_mode:
+                from simple_bypass import bypass_cloudflare
+                bypass_cloudflare(current_url, proxy=proxy)
+            elif "SB增强" in ui_mode:
+                from bypass_seleniumbase import bypass_logic
+                bypass_logic(sb)
 
-            # 再次清理弹窗
-            if len(sb.driver.window_handles) > 1:
-                for h in sb.driver.window_handles:
-                    if h != main_window:
-                        try: sb.driver.switch_to.window(h); sb.driver.close()
-                        except: pass
-                sb.driver.switch_to.window(main_window)
-
+            # 后续点击
             for btn_ref in ["captcha", "show"]:
                 selector = f'button#submit-button[data-ref="{btn_ref}"]'
-                logger.info(f"🔍 [面板监控] 寻找 [{btn_ref}] 按钮...")
                 for i in range(8):
                     if sb.is_element_visible(selector):
                         sb.execute_script(f"document.querySelector('{selector}').click();")
@@ -198,7 +179,8 @@ def run_test():
                         if not sb.is_element_visible(selector): break
                 if btn_ref == "captcha": sb.sleep(18)
 
-            # --- 第四阶段: 结果 ---
+            # --- 第三阶段: 最终验证 ---
+            # 同样重开或清理后再回访
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10)
             expiry_after = get_expiry_time_raw(sb)
@@ -206,9 +188,9 @@ def run_test():
             send_tg_notification("成功 ✅", f"前: {expiry_before}\n后: {expiry_after}", "pella_final_result.png")
 
         except Exception as e:
-            logger.error(f"🔥 [面板监控] 流程崩溃: {str(e)}")
-            sb.save_screenshot("error.png")
-            send_tg_notification("异常 ❌", f"详情: `{str(e)}`", "error.png")
+            logger.error(f"🔥 [面板监控] 最终阶段崩溃: {str(e)}")
+            sb.save_screenshot("error_final.png")
+            send_tg_notification("续期异常 ❌", f"详情: `{str(e)}`", "error_final.png")
             raise e
 
 if __name__ == "__main__":
