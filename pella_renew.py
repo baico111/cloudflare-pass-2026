@@ -18,7 +18,7 @@ def send_tg_notification(status, message, photo_path=None):
     tz_bj = timezone(timedelta(hours=8))
     bj_time = datetime.now(tz_bj).strftime('%Y-%m-%d %H:%M:%S')
     emoji = "✅" if "成功" in status else "❌"
-    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('PELLA_EMAIL')}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
+    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('EMAIL')}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
     try:
         if photo_path and os.path.exists(photo_path):
             with open(photo_path, 'rb') as f:
@@ -62,19 +62,24 @@ def get_pella_code(mail_address, app_password):
 # 3. Pella 自动化流程 (针对 Zeabur 物理加固)
 # ==========================================
 def run_test():
-    email_addr = os.environ.get("PELLA_EMAIL")
-    app_pw = os.environ.get("GMAIL_APP_PASSWORD")
-    target_server_url = "https://www.pella.app/server/c216766d5bbb47fc982167ec08c144b1"
-    renew_url = "https://cuttlinks.com/Q9wFiVeMT6vw"
+    # 改动点 1: 账号、密码、ID、代理全部改为调用面板设置的环境变量
+    email_addr = os.environ.get("EMAIL")
+    app_pw = os.environ.get("PASSWORD")
+    proxy = os.environ.get("PROXY")
+    ui_mode = os.environ.get("BYPASS_MODE", "SB增强模式")
     
-    with SB(uc=True, xvfb=True) as sb:
+    server_id = os.environ.get("SERVER_ID", "c216766d5bbb47fc982167ec08c144b1")
+    renew_id = os.environ.get("RENEW_ID", "Q9wFiVeMT6vw")
+    target_server_url = f"https://www.pella.app/server/{server_id}"
+    renew_url = f"https://cuttlinks.com/{renew_id}"
+    
+    # 保持原有的 SB 启动参数 (传入面板代理)
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
-            # --- 第一阶段: 登录 (仅放宽物理加载时间，解决打不开问题) ---
-            # 物理适配：将超时从 10 提升至 20 解决 Zeabur 网络抖动
+            # --- 第一阶段: 登录 (逻辑、时间一个字不改) ---
             sb.uc_open_with_reconnect("https://www.pella.app/login", 20)
             sb.sleep(5)
             sb.uc_gui_click_captcha()
-            # 物理适配：将等待时间从 25 提升至 60，应对可能的空响应重试
             sb.wait_for_element_visible("#identifier-field", timeout=60)
             for char in email_addr:
                 sb.add_text("#identifier-field", char)
@@ -118,12 +123,10 @@ def run_test():
                     send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 跳转续期 (物理加固，防止假死) ---
+            # --- 第三阶段: 跳转续期 (逻辑一个字不改) ---
             logger.info(f"📡 重新打开续期网站: {renew_url}")
             
-            # 物理适配：跳转前停止旧页面所有后台加载，释放 Zeabur 带宽
             sb.execute_script("window.stop();")
-            # 物理适配：重新发起 uc_open，超时设为 20
             sb.uc_open_with_reconnect(renew_url, 20)
             sb.sleep(8)
             
@@ -131,19 +134,24 @@ def run_test():
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
                     sb.js_click('button#submit-button[data-ref="first"]')
                     sb.sleep(3)
-                    # 保持原有的窗口句柄清理逻辑
                     if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
+            # 改动点 2: 破解算法根据面板选择的三种模式动态匹配，替代固定调用 bypass.py
             sb.sleep(6)
             try:
-                cf_iframe = 'iframe[src*="cloudflare"]'
-                if sb.is_element_visible(cf_iframe):
-                    sb.switch_to_frame(cf_iframe)
-                    sb.click('span.mark') 
-                    sb.switch_to_parent_frame()
-                    sb.sleep(6)
-            except: pass
+                current_url = sb.get_current_url()
+                if "并行竞争" in ui_mode:
+                    from bypass import bypass_cloudflare as api_core_1
+                    api_core_1(url=current_url, proxy=proxy)
+                elif "单浏览器" in ui_mode:
+                    from simple_bypass import bypass_cloudflare as api_core_2
+                    api_core_2(current_url, proxy=proxy)
+                elif "SB增强" in ui_mode:
+                    from bypass_seleniumbase import bypass_logic as api_core_4
+                    api_core_4(sb)
+            except Exception as e:
+                logger.warning(f"破解算法执行异常: {e}")
 
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(6):
