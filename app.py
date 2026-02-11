@@ -96,6 +96,7 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
+    # --- 还原被删除的安全设置模块 ---
     with st.expander("🔐 安全设置"):
         old_code = st.text_input("当前授权码", type="password", key="old_code")
         new_code = st.text_input("新授权码", type="password", key="new_code")
@@ -125,25 +126,23 @@ for i, task in enumerate(updated_tasks):
         head_1.markdown(status_html, unsafe_allow_html=True)
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
 
-        c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
-        
-        # 针对 Pella 脚本隐藏算法选择
+        # --- Pella 6框平铺 vs 其他 5框平铺 ---
         if task.get('script') == "pella_renew.py":
-            c1.text_input("算法模式", value="内置 Kata 穿透算法", disabled=True, key=f"algo_dis_{i}")
+            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.8, 0.8, 1.2, 1.8])
+            c1.text_input("算法模式", value="内置模式", disabled=True, key=f"algo_dis_{i}")
             task['mode'] = "内置模式"
+            task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
+            task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
+            task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
+            task['renew_id'] = c5.text_input("续期ID", value=task.get('renew_id', 'm4w0wJrEmgEC'), key=f"rid_{i}")
+            task['proxy'] = c6.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
         else:
+            c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
             task['mode'] = c1.selectbox("破解算法", ["单浏览器模式 (对应脚本: simple_bypass.py)", "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "并行竞争模式 (对应脚本: bypass.py)"], key=f"mode_{i}")
-            
-        task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
-        task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
-        task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
-        task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://user:pass@host:port")
-
-        # Pella 专属续期ID输入
-        if task.get('script') == "pella_renew.py":
-            st.markdown("<div style='margin: 5px 0;'></div>", unsafe_allow_html=True)
-            p_c1, p_c2 = st.columns([2, 4])
-            task['renew_id'] = p_c1.text_input("续期ID (Cuty.io)", value=task.get('renew_id', 'm4w0wJrEmgEC'), key=f"rid_{i}")
+            task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
+            task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
+            task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
+            task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
 
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         if task.get('script') == "luneshost.py":
@@ -174,6 +173,7 @@ for i, task in enumerate(updated_tasks):
         if btn_1.button("💾 保存", key=f"save_{i}"):
             save_config(updated_tasks)
             st.toast(f"{task['name']} 已保存")
+            
         if btn_2.button("🚀 同步", key=f"run_{i}"):
             log_area = st.empty()
             with st.status(f"同步中...", expanded=True) as status:
@@ -184,19 +184,26 @@ for i, task in enumerate(updated_tasks):
                     env.update({"PELLA_EMAIL": task['email'], "GMAIL_APP_PASSWORD": task['password']})
                 if task.get('script') == "luneshost.py":
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
+                
                 process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
                     log_area.code("\n".join(full_log.splitlines()[-6:]))
                 process.wait()
-                if process.returncode == 0:
+                
+                # 配合 scheduler 逻辑：只有真正的 Pella 成功标记才更新 UI
+                should_update_ui = True
+                if task.get('script') == "pella_renew.py" and "PELLA_SUCCESS_FLAG" not in full_log:
+                    should_update_ui = False
+                
+                if process.returncode == 0 and should_update_ui:
                     task['last_run'] = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
                     save_config(updated_tasks)
                     status.update(label="成功", state="complete")
                     st.rerun()
                 else:
-                    status.update(label="成功", state="complete")
+                    status.update(label="任务完成 (未触发时间更新)", state="complete")
                     st.rerun()
 
         if btn_3.button("🗑️ 移除", key=f"del_{i}"):
