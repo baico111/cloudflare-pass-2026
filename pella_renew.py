@@ -4,6 +4,7 @@ import imaplib
 import email
 import re
 import requests
+import sys
 from datetime import datetime, timedelta, timezone
 from seleniumbase import SB
 from loguru import logger
@@ -59,7 +60,7 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (变量接入 + 内存优化版)
+# 3. Pella 自动化流程 (逻辑闭环修复版)
 # ==========================================
 def run_test():
     email_addr = os.environ.get("PELLA_EMAIL")
@@ -91,40 +92,56 @@ def run_test():
             sb.type('input[data-input-otp="true"]', auth_code)
             sb.sleep(10)
 
-            # --- 第二阶段: 检查 Pella 状态 ---
-            logger.info("🔍 [面板监控] 正在检查服务器初始状态...")
+            # --- 第二阶段: 检查 Pella 状态 (修复版：高精度按钮扫描) ---
+            logger.info("🔍 [面板监控] 正在检查服务器初始状态及续期按钮可用性...")
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10) 
             
-            def get_expiry_time_raw(sb_obj):
+            def get_pella_status(sb_obj, r_id):
                 try:
-                    js_code = """
-                    var divs = document.querySelectorAll('div');
-                    for (var d of divs) {
-                        var txt = d.innerText;
-                        if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours') || txt.includes('天'))) {
-                            return txt;
-                        }
-                    }
-                    return "未找到时间文本";
+                    js_code = f"""
+                    (function() {{
+                        var res = {{ time: "未找到时间文本", can_renew: false }};
+                        var divs = document.querySelectorAll('div');
+                        for (var d of divs) {{
+                            var txt = d.innerText;
+                            if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours') || txt.includes('天'))) {{
+                                res.time = txt;
+                            }}
+                        }}
+                        // 修正：采用更宽松的透明度阈值(0.8)防止误判，并检查 pointer-events
+                        var btn = document.querySelector('a[href*="' + r_id + '"]');
+                        if (btn) {{
+                            var style = window.getComputedStyle(btn);
+                            var is_dimmed = parseFloat(style.opacity) < 0.8 || 
+                                           style.pointerEvents === 'none' ||
+                                           btn.classList.contains('opacity-50');
+                            res.can_renew = !is_dimmed;
+                        }}
+                        return res;
+                    }})();
                     """
-                    raw_text = sb_obj.execute_script(js_code)
-                    clean_text = " ".join(raw_text.split())
+                    data = sb_obj.execute_script(js_code)
+                    raw_time = data['time']
+                    clean_text = " ".join(raw_time.split())
+                    
                     if "expiring in" in clean_text:
-                        return clean_text.split("expiring in")[1].split(".")[0].strip()
-                    return clean_text[:60]
-                except: return "获取失败"
+                        display_time = clean_text.split("expiring in")[1].split(".")[0].strip()
+                    else:
+                        display_time = clean_text[:60]
+                        
+                    return display_time, data['can_renew']
+                except: return "获取失败", False
 
-            expiry_before = get_expiry_time_raw(sb)
-            logger.info(f"🕒 [面板监控] 续期前剩余时间: {expiry_before}")
+            # 执行状态扫描
+            expiry_before, is_highlighted = get_pella_status(sb, renew_id)
+            logger.info(f"🕒 [面板监控] 续期前剩余时间: {expiry_before} | 按钮可用: {is_highlighted}")
 
-            target_btn_in_pella = f'a[href*="{renew_id}"]'
-            if sb.is_element_visible(target_btn_in_pella):
-                btn_class = sb.get_attribute(target_btn_in_pella, "class")
-                if "opacity-50" in btn_class or "pointer-events-none" in btn_class:
-                    logger.warning("🕒 [面板监控] 按钮处于冷却中，任务结束。")
-                    send_tg_notification("保活报告 (冷却中) 🕒", f"按钮尚在冷却。剩余时间: {expiry_before}", None)
-                    return 
+            # 核心修正：如果没高亮，直接安全退出，不打印成功标记，确保 scheduler 不会更新运行时间
+            if not is_highlighted:
+                logger.warning("🕒 [面板监控] 检测到续期按钮处于冷却期，任务结束。")
+                send_tg_notification("保活报告 (冷却中) 🕒", f"按钮尚在冷却，本次不更新运行时间。剩余时间: {expiry_before}", None)
+                sys.exit(0) # 干净退出，不触发后续逻辑
 
             # --- 第三阶段: 进入续期网站点击第一个 Continue ---
             logger.info(f"🚀 [面板监控] 跳转至续期网站: {renew_url}")
@@ -213,14 +230,16 @@ def run_test():
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10)
             
-            expiry_after = get_expiry_time_raw(sb)
+            expiry_after, _ = get_pella_status(sb, renew_id)
             logger.info(f"🕒 [面板监控] 续期后剩余时间: {expiry_after}")
             sb.save_screenshot("final_result.png")
             
             if click_final:
+                # 只有走到这里才算点击成功，打印标记供 scheduler 识别
+                print("PELLA_SUCCESS_FLAG")
                 send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "final_result.png")
             else:
-                send_tg_notification("操作反馈 ⚠️", f"流程已执行至最后，请检查截图。续期前: {expiry_before}\n当前时间: {expiry_after}", "final_result.png")
+                send_tg_notification("操作反馈 ⚠️", f"流程已执行，请检查截图。续期前: {expiry_before}\n当前时间: {expiry_after}", "final_result.png")
 
         except Exception as e:
             logger.error(f"🔥 [面板监控] 流程崩溃: {str(e)}")
