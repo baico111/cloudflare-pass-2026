@@ -7,6 +7,7 @@ ENV PYTHONUNBUFFERED=1
 ENV WEB_ACCESS_CODE=admin123
 
 # 2. 安装系统依赖 (增加了备份字体支持，防止验证码截图乱码)
+# 额外增加了 libnss3-tools 用于某些环境下的证书修复
 RUN apt-get update -qq && apt-get install -y -qq \
     xvfb \
     xauth \
@@ -32,6 +33,7 @@ RUN apt-get update -qq && apt-get install -y -qq \
     wget \
     curl \
     unzip \
+    libnss3-tools \
     --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
@@ -50,13 +52,13 @@ RUN mkdir -p /app/output && chmod 777 /app/output
 COPY . .
 
 # 5. 安装 Python 依赖
-# 增加 pella_renew.py 可能用到的 imaplib2 (标准库 imaplib 增强版，可选)
+# 增加 imaplib2 确保 Gmail 验证码抓取更稳定
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit requests apscheduler
+RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit requests apscheduler imaplib2
 
 # 6. 预初始化 SeleniumBase (必须，用于过 CF)
 RUN sbase install chromedriver
 
 # 7. 启动命令 (保持原有逻辑不动，确保后台调度器运行)
-# 7. 启动命令 (增加了环境变量以彻底解决 Broken pipe 和内存崩溃问题)
-CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && export QT_X11_NO_MITSHM=1 && export _CHROME_STRATEGY=nosandbox && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 1800; done"]
+# 针对 Zeabur 增加了 MALLOC_ARENA_MAX 以强制限制 Python 和 Chrome 的内存碎片
+CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && export MALLOC_ARENA_MAX=2 && export QT_X11_NO_MITSHM=1 && export _CHROME_STRATEGY=nosandbox && streamlit run app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 1800; done"]
