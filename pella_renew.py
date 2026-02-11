@@ -18,7 +18,7 @@ def send_tg_notification(status, message, photo_path=None):
     tz_bj = timezone(timedelta(hours=8))
     bj_time = datetime.now(tz_bj).strftime('%Y-%m-%d %H:%M:%S')
     emoji = "✅" if "成功" in status else "❌"
-    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('EMAIL')}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
+    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('PELLA_EMAIL')}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
     try:
         if photo_path and os.path.exists(photo_path):
             with open(photo_path, 'rb') as f:
@@ -59,35 +59,22 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (物理加固版)
+# 3. Pella 自动化流程 (针对 Zeabur 物理加固)
 # ==========================================
 def run_test():
-    email_addr = os.environ.get("EMAIL")
-    app_pw = os.environ.get("PASSWORD")
-    proxy = os.environ.get("PROXY")
-    ui_mode = os.environ.get("BYPASS_MODE", "SB增强模式")
+    email_addr = os.environ.get("PELLA_EMAIL")
+    app_pw = os.environ.get("GMAIL_APP_PASSWORD")
+    target_server_url = "https://www.pella.app/server/c216766d5bbb47fc982167ec08c144b1"
+    renew_url = "https://cuttlinks.com/Q9wFiVeMT6vw"
     
-    server_id = os.environ.get("SERVER_ID", "c216766d5bbb47fc982167ec08c144b1")
-    renew_id = os.environ.get("RENEW_ID", "Q9wFiVeMT6vw")
-    target_server_url = f"https://www.pella.app/server/{server_id}"
-    renew_url = f"https://cuttlinks.com/{renew_id}"
-    
-    # 物理加固 1: 启动参数优化，增加页面加载策略
-    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None, page_load_strategy="normal") as sb:
+    with SB(uc=True, xvfb=True) as sb:
         try:
-            # --- 第一阶段: 登录 (解决 ERR_EMPTY_RESPONSE 问题) ---
-            logger.info("📡 尝试建立初始连接...")
-            # 物理加固 2: 强制使用这种方式打开，如果报错则自动重试 3 次
-            for _ in range(3):
-                try:
-                    sb.activate_cdp() # 激活底层协议，增强穿透
-                    sb.uc_open_with_reconnect("https://www.pella.app/login", 15)
-                    if "pella.app" in sb.get_current_url(): break
-                except:
-                    sb.sleep(5)
-                    sb.driver.refresh()
-            
+            # --- 第一阶段: 登录 (仅放宽物理加载时间，解决打不开问题) ---
+            # 物理适配：将超时从 10 提升至 20 解决 Zeabur 网络抖动
+            sb.uc_open_with_reconnect("https://www.pella.app/login", 20)
             sb.sleep(5)
+            sb.uc_gui_click_captcha()
+            # 物理适配：将等待时间从 25 提升至 60，应对可能的空响应重试
             sb.wait_for_element_visible("#identifier-field", timeout=60)
             for char in email_addr:
                 sb.add_text("#identifier-field", char)
@@ -131,45 +118,31 @@ def run_test():
                     send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 跳转续期 (解决卡死/黑屏问题) ---
-            logger.info(f"🚀 跳转至续期网站: {renew_url}")
+            # --- 第三阶段: 跳转续期 (物理加固，防止假死) ---
+            logger.info(f"📡 重新打开续期网站: {renew_url}")
             
-            # 物理加固 3: 跳转前彻底清理所有挂起的 JS 任务
+            # 物理适配：跳转前停止旧页面所有后台加载，释放 Zeabur 带宽
             sb.execute_script("window.stop();")
-            time.sleep(2)
+            # 物理适配：重新发起 uc_open，超时设为 20
+            sb.uc_open_with_reconnect(renew_url, 20)
+            sb.sleep(8)
             
-            # 物理加固 4: 强制在新页面打开以打破之前的 Session 阻塞
-            sb.execute_script(f"window.open('{renew_url}', '_blank');")
-            sb.sleep(5)
-            sb.switch_to_window(1) # 切换到新打开的续期页
-            
-            # 如果没打开，就地重试
-            if "cuttlinks.com" not in sb.get_current_url():
-                sb.uc_open_with_reconnect(renew_url, 20)
-
             for i in range(5):
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
                     sb.js_click('button#submit-button[data-ref="first"]')
                     sb.sleep(3)
-                    # 自动清理弹出的劫持广告窗口
-                    if len(sb.driver.window_handles) > 2:
-                        for handle in sb.driver.window_handles[2:]:
-                            sb.driver.switch_to.window(handle)
-                            sb.driver.close()
-                        sb.driver.switch_to.window(sb.driver.window_handles[1])
+                    # 保持原有的窗口句柄清理逻辑
+                    if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # --- 算法分支 ---
             sb.sleep(6)
             try:
-                from simple_bypass import bypass_cloudflare as api_core_2
-                from simple_bypass import bypass_parallel as api_core_3
-                from bypass_seleniumbase import bypass_logic as api_core_4
-                
-                current_url = sb.get_current_url()
-                if "单浏览器" in ui_mode: api_core_2(current_url, proxy=proxy)
-                elif "并行竞争" in ui_mode: api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
-                elif "SB增强" in ui_mode: api_core_4(sb)
+                cf_iframe = 'iframe[src*="cloudflare"]'
+                if sb.is_element_visible(cf_iframe):
+                    sb.switch_to_frame(cf_iframe)
+                    sb.click('span.mark') 
+                    sb.switch_to_parent_frame()
+                    sb.sleep(6)
             except: pass
 
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
@@ -177,12 +150,11 @@ def run_test():
                 if sb.is_element_visible(captcha_btn):
                     sb.js_click(captcha_btn)
                     sb.sleep(3)
-                    if len(sb.driver.window_handles) > 2:
+                    if len(sb.driver.window_handles) > 1:
                         curr = sb.driver.current_window_handle
                         for h in sb.driver.window_handles:
-                            if h != curr and h != sb.driver.window_handles[0]: 
-                                sb.driver.switch_to.window(h); sb.driver.close()
-                        sb.driver.switch_to.window(curr)
+                            if h != curr: sb.driver.switch_to.window(h); sb.driver.close()
+                        sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible(captcha_btn): break
 
             logger.info("等待计时结束...")
@@ -192,20 +164,27 @@ def run_test():
                 if sb.is_element_visible(final_btn):
                     sb.js_click(final_btn)
                     sb.sleep(3)
+                    if len(sb.driver.window_handles) > 1:
+                        curr = sb.driver.current_window_handle
+                        for h in sb.driver.window_handles:
+                            if h != curr: sb.driver.switch_to.window(h); sb.driver.close()
+                        sb.driver.switch_to.window(sb.driver.window_handles[0])
                     if not sb.is_element_visible(final_btn): break
 
-            # --- 第四阶段: 结果验证 ---
+            # --- 第四阶段: 返回 Pella 验证结果 ---
             logger.info("操作完成，回访 Pella...")
-            sb.switch_to_window(0) # 切回 Pella 页面
+            sb.sleep(5)
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10)
+            
             expiry_after = get_expiry_time_raw(sb)
-            sb.save_screenshot("/app/output/pella_final_result.png")
-            send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "/app/output/pella_final_result.png")
+            sb.save_screenshot("pella_final_result.png")
+            
+            send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "pella_final_result.png")
 
         except Exception as e:
-            sb.save_screenshot("/app/output/error.png")
-            send_tg_notification("流程异常 ❌", f"错误详情: `{str(e)}`", "/app/output/error.png")
+            sb.save_screenshot("error.png")
+            send_tg_notification("流程异常 ❌", f"错误详情: `{str(e)}`", "error.png")
             raise e
 
 if __name__ == "__main__":
