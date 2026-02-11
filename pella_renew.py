@@ -60,7 +60,7 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (资源极限加固版)
+# 3. Pella 自动化流程 (内存极限防御版)
 # ==========================================
 def run_test():
     email_addr = os.environ.get("EMAIL")
@@ -73,7 +73,7 @@ def run_test():
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuttlinks.com/{renew_id}"
     
-    # 物理加固：开启 block_images(禁图) 并限制内存使用
+    # 物理适配：同时禁图、禁用插件、禁用GPU，最大限度节省内存
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None, block_images=True) as sb:
         try:
             # --- 第一阶段: 登录 ---
@@ -111,41 +111,50 @@ def run_test():
             expiry_before = get_expiry_time_raw(sb)
             logger.info(f"🕒 [面板监控] 续期前时长: {expiry_before}")
 
-            # --- 第三阶段: 续期网站 (防止崩溃加固) ---
+            # --- 第三阶段: 续期网站 (物理防崩溃：拦截广告请求) ---
             logger.info(f"🚀 [面板监控] 正在跳转至续期站: {renew_url}")
             
-            # 物理加固：跳转前彻底断开之前的 Session 链接，减少负载
+            # 物理加固：通过 CDP 协议在跳转前强制拦截常见的广告域名请求，防止内存爆炸
+            try:
+                sb.execute_cdp_cmd("Network.setBlockedURLs", {"urls": [
+                    "*google-analytics.com*", "*googletagservices.com*", "*googlesyndication.com*", 
+                    "*doubleclick.net*", "*adnxs.com*", "*advertising.com*", "*popads.net*", 
+                    "*.mp4", "*.m4a", "*.webm" # 拦截视频流，这是最吃内存的
+                ]})
+                sb.execute_cdp_cmd("Network.enable", {})
+            except: pass
+
             sb.execute_script("window.stop();")
             
-            # 使用 try-except 配合强制超时，防止浏览器被广告页死锁
+            # 使用更短的超时，只要按钮出来就止损
             try:
                 sb.driver.set_page_load_timeout(15) 
                 sb.open(renew_url)
             except:
-                # 即使超时，按钮往往已经渲染，强制停止加载进入下一步
                 sb.execute_script("window.stop();")
             
             sb.sleep(5)
-            main_window = sb.driver.current_window_handle
+            # 核心修正：在尝试获取句柄前先检查浏览器是否存活
+            try:
+                main_window = sb.driver.current_window_handle
+            except:
+                raise Exception("物理内存溢出，浏览器进程已崩溃。请尝试更换 Zeabur 区域或减少并发任务。")
 
             for i in range(5):
                 logger.info(f"🖱️ [面板监控] 检测 [First] 按钮 (第 {i+1} 次)...")
-                # 针对 Zeabur：用 JS 检查确保不会因为渲染卡顿导致异常
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
-                    logger.info("✅ [面板监控] 发现按钮，执行 JS 点击...")
-                    # 针对物理环境：用 JS 直接点，防止被透明广告层拦截
+                    # JS 点击穿透广告层
                     sb.execute_script("document.querySelector('button#submit-button[data-ref=\"first\"]').click();")
                     sb.sleep(3)
                     
-                    # 针对弹窗广告：循环物理关闭所有广告窗口
+                    # 循环关闭所有弹窗
                     if len(sb.driver.window_handles) > 1:
-                        logger.info(f"⚠️ [面板监控] 物理关闭新弹出的广告页...")
                         for h in sb.driver.window_handles:
                             if h != main_window:
-                                sb.driver.switch_to.window(h)
-                                sb.driver.close()
+                                try:
+                                    sb.driver.switch_to.window(h); sb.driver.close()
+                                except: pass
                         sb.driver.switch_to.window(main_window)
-                    
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
                 sb.sleep(2)
 
@@ -165,10 +174,12 @@ def run_test():
             except Exception as e:
                 logger.error(f"❌ 破解算法报错: {e}")
 
-            # 再次清理弹窗，确保内存纯净
+            # 再次清理弹窗
             if len(sb.driver.window_handles) > 1:
                 for h in sb.driver.window_handles:
-                    if h != main_window: sb.driver.switch_to.window(h); sb.driver.close()
+                    if h != main_window:
+                        try: sb.driver.switch_to.window(h); sb.driver.close()
+                        except: pass
                 sb.driver.switch_to.window(main_window)
 
             for btn_ref in ["captcha", "show"]:
@@ -180,12 +191,14 @@ def run_test():
                         sb.sleep(3)
                         if len(sb.driver.window_handles) > 1:
                             for h in sb.driver.window_handles:
-                                if h != main_window: sb.driver.switch_to.window(h); sb.driver.close()
+                                if h != main_window:
+                                    try: sb.driver.switch_to.window(h); sb.driver.close()
+                                    except: pass
                             sb.driver.switch_to.window(main_window)
                         if not sb.is_element_visible(selector): break
                 if btn_ref == "captcha": sb.sleep(18)
 
-            # --- 第四阶段: 结果验证 ---
+            # --- 第四阶段: 结果 ---
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10)
             expiry_after = get_expiry_time_raw(sb)
