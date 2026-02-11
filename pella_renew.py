@@ -9,7 +9,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. TG 通知功能 (保持不变)
+# 1. TG 通知功能 (完全保持原样)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -28,7 +28,7 @@ def send_tg_notification(status, message, photo_path=None):
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
-# 2. Gmail 提取 (保持不变)
+# 2. Gmail 提取 (完全保持原样)
 # ==========================================
 def get_pella_code(mail_address, app_password):
     logger.info("📡 正在连接 Gmail 抓取验证码...")
@@ -59,24 +59,22 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (针对 Zeabur 物理加固)
+# 3. Pella 自动化流程
 # ==========================================
 def run_test():
-    # 改动点 1: 账号、密码、ID、代理全部改为调用面板设置的环境变量
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
     ui_mode = os.environ.get("BYPASS_MODE", "SB增强模式")
     
     server_id = os.environ.get("SERVER_ID", "c216766d5bbb47fc982167ec08c144b1")
-    renew_id = os.environ.get("RENEW_ID", "Q9wFiVeMT6vw")
+    renew_id = os.environ.get("RENEW_ID", "4j4yqfNJA")
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuttlinks.com/{renew_id}"
     
-    # 保持原有的 SB 启动参数 (传入面板代理)
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
-            # --- 第一阶段: 登录 (逻辑、时间一个字不改) ---
+            # --- 第一阶段: 登录 ---
             sb.uc_open_with_reconnect("https://www.pella.app/login", 20)
             sb.sleep(5)
             sb.uc_gui_click_captcha()
@@ -120,24 +118,33 @@ def run_test():
             target_btn = 'a[href*="tpi.li/FSfV"]'
             if sb.is_element_visible(target_btn):
                 if "opacity-50" in sb.get_attribute(target_btn, "class"):
-                    send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
+                    send_tg_notification("冷却中 🕒", f"按钮尚 in 冷却。剩余: {expiry_before}", None)
                     return 
 
-            # --- 第三阶段: 跳转续期 (逻辑一个字不改) ---
+            # --- 第三阶段: 续期网站操作 (针对点一下弹一页的广告加固) ---
             logger.info(f"📡 重新打开续期网站: {renew_url}")
             
             sb.execute_script("window.stop();")
             sb.uc_open_with_reconnect(renew_url, 20)
             sb.sleep(8)
             
+            # 保存主页面的句柄
+            main_window = sb.driver.current_window_handle
+
             for i in range(5):
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
                     sb.js_click('button#submit-button[data-ref="first"]')
                     sb.sleep(3)
-                    if len(sb.driver.window_handles) > 1: sb.driver.switch_to.window(sb.driver.window_handles[0])
+                    # 针对弹窗：如果打开了新网页，循环关闭它们，直到只剩下主网页
+                    if len(sb.driver.window_handles) > 1:
+                        for handle in sb.driver.window_handles:
+                            if handle != main_window:
+                                sb.driver.switch_to.window(handle)
+                                sb.driver.close()
+                        sb.driver.switch_to.window(main_window)
                     if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # 改动点 2: 破解算法根据面板选择的三种模式动态匹配，替代固定调用 bypass.py
+            # --- 算法分支 ---
             sb.sleep(6)
             try:
                 current_url = sb.get_current_url()
@@ -153,16 +160,26 @@ def run_test():
             except Exception as e:
                 logger.warning(f"破解算法执行异常: {e}")
 
+            # 破解后也清理一次弹窗
+            if len(sb.driver.window_handles) > 1:
+                for handle in sb.driver.window_handles:
+                    if handle != main_window:
+                        sb.driver.switch_to.window(handle)
+                        sb.driver.close()
+                sb.driver.switch_to.window(main_window)
+
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(6):
                 if sb.is_element_visible(captcha_btn):
                     sb.js_click(captcha_btn)
                     sb.sleep(3)
+                    # 清理点击产生的弹窗
                     if len(sb.driver.window_handles) > 1:
-                        curr = sb.driver.current_window_handle
-                        for h in sb.driver.window_handles:
-                            if h != curr: sb.driver.switch_to.window(h); sb.driver.close()
-                        sb.driver.switch_to.window(sb.driver.window_handles[0])
+                        for handle in sb.driver.window_handles:
+                            if handle != main_window:
+                                sb.driver.switch_to.window(handle)
+                                sb.driver.close()
+                        sb.driver.switch_to.window(main_window)
                     if not sb.is_element_visible(captcha_btn): break
 
             logger.info("等待计时结束...")
@@ -172,11 +189,13 @@ def run_test():
                 if sb.is_element_visible(final_btn):
                     sb.js_click(final_btn)
                     sb.sleep(3)
+                    # 清理点击产生的弹窗
                     if len(sb.driver.window_handles) > 1:
-                        curr = sb.driver.current_window_handle
-                        for h in sb.driver.window_handles:
-                            if h != curr: sb.driver.switch_to.window(h); sb.driver.close()
-                        sb.driver.switch_to.window(sb.driver.window_handles[0])
+                        for handle in sb.driver.window_handles:
+                            if handle != main_window:
+                                sb.driver.switch_to.window(handle)
+                                sb.driver.close()
+                        sb.driver.switch_to.window(main_window)
                     if not sb.is_element_visible(final_btn): break
 
             # --- 第四阶段: 返回 Pella 验证结果 ---
