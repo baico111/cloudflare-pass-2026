@@ -17,8 +17,9 @@ def send_tg_notification(status, message, photo_path=None):
     if not (token and chat_id): return
     tz_bj = timezone(timedelta(hours=8))
     bj_time = datetime.now(tz_bj).strftime('%Y-%m-%d %H:%M:%S')
+    email_user = os.environ.get('EMAIL')
     emoji = "✅" if "成功" in status else "❌"
-    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('EMAIL')}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
+    formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{email_user}`\n📡 **状态**: {status}\n📝 **详情**: {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
     try:
         if photo_path and os.path.exists(photo_path):
             with open(photo_path, 'rb') as f:
@@ -59,21 +60,21 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (主逻辑完全不动)
+# 3. Pella 自动化流程 (资源加固版)
 # ==========================================
 def run_test():
-    # 改动点：对齐面板环境变量名
     email_addr = os.environ.get("EMAIL")
     app_pw = os.environ.get("PASSWORD")
     proxy = os.environ.get("PROXY")
     ui_mode = os.environ.get("BYPASS_MODE", "SB增强模式")
-    
     server_id = os.environ.get("SERVER_ID", "c216766d5bbb47fc982167ec08c144b1")
-    renew_id = os.environ.get("RENEW_ID", "Q9wFiVeMT6vw")
+    renew_id = os.environ.get("RENEW_ID", "4j4yqfNJA")
+    
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuttlinks.com/{renew_id}"
     
-    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
+    # 物理适配：增加 block_images 防止内存溢出
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None, block_images=True) as sb:
         try:
             # --- 第一阶段: 登录 ---
             logger.info("🚀 [面板监控] 正在打开 Pella 登录页面...")
@@ -82,7 +83,6 @@ def run_test():
             sb.uc_gui_click_captcha()
             sb.wait_for_element_visible("#identifier-field", timeout=60)
             
-            logger.info(f"⌨️ [面板监控] 正在输入账号: {email_addr}")
             for char in email_addr:
                 sb.add_text("#identifier-field", char)
                 time.sleep(0.1)
@@ -96,102 +96,75 @@ def run_test():
             sb.sleep(10)
 
             # --- 第二阶段: 检查状态 ---
-            logger.info("🔍 [面板监控] 正在回访服务器页面检查初始时长...")
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10) 
             
             def get_expiry_time_raw(sb_obj):
                 try:
-                    js_code = """
-                    var divs = document.querySelectorAll('div');
-                    for (var d of divs) {
-                        var txt = d.innerText;
-                        if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours') || txt.includes('天'))) {
-                            return txt;
-                        }
-                    }
-                    return "未找到时间文本";
-                    """
+                    js_code = "var divs = document.querySelectorAll('div'); for (var d of divs) { var txt = d.innerText; if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours'))) { return txt; } } return '未找到';"
                     raw_text = sb_obj.execute_script(js_code)
                     clean_text = " ".join(raw_text.split())
-                    if "expiring in" in clean_text:
-                        return clean_text.split("expiring in")[1].split(".")[0].strip()
+                    if "expiring in" in clean_text: return clean_text.split("expiring in")[1].split(".")[0].strip()
                     return clean_text[:60]
                 except: return "获取失败"
 
             expiry_before = get_expiry_time_raw(sb)
             logger.info(f"🕒 [面板监控] 续期前时长: {expiry_before}")
 
-            target_btn = 'a[href*="tpi.li/FSfV"]'
-            if sb.is_element_visible(target_btn):
-                if "opacity-50" in sb.get_attribute(target_btn, "class"):
-                    logger.warning("🕒 [面板监控] 按钮处于冷却状态，跳过后续操作。")
-                    send_tg_notification("冷却中 🕒", f"按钮尚在冷却。剩余: {expiry_before}", None)
-                    return 
-
-            # --- 第三阶段: 续期网站操作 (物理日志监控) ---
-            logger.info(f"🚀 [面板监控] 正在物理跳转至续期站: {renew_url}")
-            sb.execute_script("window.stop();") # 物理加固：停止背景加载
-            sb.uc_open_with_reconnect(renew_url, 20)
-            sb.sleep(8)
+            # --- 第三阶段: 续期网站 (防止资源崩溃加固) ---
+            logger.info(f"🚀 [面板监控] 正在跳转至续期站: {renew_url}")
             
-            # 记录主窗口句柄
+            # 物理加固：强制超时和停止加载，防止内存被广告吸干
+            sb.execute_script("window.stop();")
+            try:
+                sb.driver.set_page_load_timeout(20)
+                sb.open(renew_url)
+            except:
+                sb.execute_script("window.stop();")
+            
+            sb.sleep(5)
             main_window = sb.driver.current_window_handle
-            logger.info(f"🌐 [面板监控] 续期页已打开，当前 URL: {sb.get_current_url()}")
 
             for i in range(5):
-                logger.info(f"🖱️ [面板监控] 尝试点击 [First] 按钮 (第 {i+1}/5 次)...")
+                logger.info(f"🖱️ [面板监控] 检测 [First] 按钮 (第 {i+1} 次)...")
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
                     sb.js_click('button#submit-button[data-ref="first"]')
                     sb.sleep(3)
-                    
-                    # 物理修正：点击即弹窗时，直接物理关闭广告标签页
+                    # 针对你提到的点一下弹一页：执行强制物理关窗
                     if len(sb.driver.window_handles) > 1:
-                        logger.info(f"⚠️ [面板监控] 检测到弹窗广告 (数量: {len(sb.driver.window_handles)-1})，正在物理关闭...")
-                        for handle in sb.driver.window_handles:
-                            if handle != main_window:
-                                sb.driver.switch_to.window(handle)
-                                sb.driver.close()
+                        for h in sb.driver.window_handles:
+                            if h != main_window:
+                                sb.driver.switch_to.window(h); sb.driver.close()
                         sb.driver.switch_to.window(main_window)
-                    
-                    if not sb.is_element_visible('button#submit-button[data-ref="first"]'):
-                        logger.info("✅ [面板监控] [First] 按钮点击成功，已消失。")
-                        break
-                else:
-                    logger.warning(f"⏳ [面板监控] 没看到按钮，当前 URL: {sb.get_current_url()}")
-                    sb.sleep(3)
+                    if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
+                sb.sleep(2)
 
-            # --- 算法分支 (人机验证前置) ---
-            logger.info(f"🛡️ [面板监控] 正在按面板选择模式执行破解: {ui_mode}")
+            # --- 模式分支 ---
             sb.sleep(6)
             try:
                 current_url = sb.get_current_url()
                 if "并行竞争" in ui_mode:
-                    from bypass import bypass_cloudflare as api_core_1
-                    api_core_1(url=current_url, proxy=proxy)
+                    from bypass import bypass_cloudflare
+                    bypass_cloudflare(url=current_url, proxy=proxy)
                 elif "单浏览器" in ui_mode:
-                    from simple_bypass import bypass_cloudflare as api_core_2
-                    api_core_2(current_url, proxy=proxy)
+                    from simple_bypass import bypass_cloudflare
+                    bypass_cloudflare(current_url, proxy=proxy)
                 elif "SB增强" in ui_mode:
-                    from bypass_seleniumbase import bypass_logic as api_core_4
-                    api_core_4(sb)
-                logger.info("✅ [面板监控] 破解算法环节已通过。")
+                    from bypass_seleniumbase import bypass_logic
+                    bypass_logic(sb)
             except Exception as e:
-                logger.error(f"❌ [面板监控] 算法执行报错: {e}")
+                logger.error(f"❌ 破解算法报错: {e}")
 
-            # 再次清理由于算法可能产生的多余窗口
+            # 再次清理弹窗
             if len(sb.driver.window_handles) > 1:
                 for h in sb.driver.window_handles:
                     if h != main_window: sb.driver.switch_to.window(h); sb.driver.close()
                 sb.driver.switch_to.window(main_window)
 
-            # 流程后续点击 (逻辑一字未动)
             for btn_ref in ["captcha", "show"]:
                 selector = f'button#submit-button[data-ref="{btn_ref}"]'
-                logger.info(f"🔍 [面板监控] 寻找 [{btn_ref}] 按钮...")
                 for i in range(8):
                     if sb.is_element_visible(selector):
-                        logger.info(f"🖱️ [面板监控] 点击 [{btn_ref}] 按钮")
                         sb.js_click(selector)
                         sb.sleep(3)
                         if len(sb.driver.window_handles) > 1:
@@ -199,26 +172,19 @@ def run_test():
                                 if h != main_window: sb.driver.switch_to.window(h); sb.driver.close()
                             sb.driver.switch_to.window(main_window)
                         if not sb.is_element_visible(selector): break
-                if btn_ref == "captcha":
-                    logger.info("⌛ [面板监控] 进入 18 秒等待计时...")
-                    sb.sleep(18)
+                if btn_ref == "captcha": sb.sleep(18)
 
-            # --- 第四阶段: 返回 Pella 验证结果 ---
-            logger.info("🏁 [面板监控] 流程全部结束，正在回访 Pella 验证最终时长...")
-            sb.sleep(5)
+            # --- 第四阶段: 结果 ---
             sb.uc_open_with_reconnect(target_server_url, 15)
             sb.sleep(10)
-            
             expiry_after = get_expiry_time_raw(sb)
-            logger.info(f"🕒 [面板监控] 续期后时长: {expiry_after}")
             sb.save_screenshot("pella_final_result.png")
-            
-            send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "pella_final_result.png")
+            send_tg_notification("成功 ✅", f"前: {expiry_before}\n后: {expiry_after}", "pella_final_result.png")
 
         except Exception as e:
-            logger.error(f"🔥 [面板监控] 流程崩溃: {str(e)}")
+            logger.error(f"🔥 [面板监控] 崩溃: {str(e)}")
             sb.save_screenshot("error.png")
-            send_tg_notification("流程异常 ❌", f"错误详情: `{str(e)}`", "error.png")
+            send_tg_notification("异常 ❌", f"详情: `{str(e)}`", "error.png")
             raise e
 
 if __name__ == "__main__":
