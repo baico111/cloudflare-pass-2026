@@ -71,20 +71,31 @@ def run_auto_renew():
     OUTPUT_DIR = Path("/app/output")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    # 核心修改：挂载代理隧道
-    with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
-        try:
-            # ---- [步骤 A] 主流程登录 ----
-            logger.info(f"🚀 正在尝试连接 Katabump 登录页: {login_url}")
-            sb.uc_open_with_reconnect(login_url, 10)
+   with SB(uc= True , xvfb= True , proxy=proxy if proxy else  None ) as sb:
+        尝试：
+            # ---- [步骤 A] 填表登录 ----
+            logger.info( f"🚀 访问登录页: {login_url} " )
+            sb.uc_open_with_reconnect(login_url, 10 )
+            sb.wait_for_element_visible( "#email" , timeout= 25 )
+            sb.execute_script( f'document.querySelector("#email").value = " {email} "' )
+            sb.execute_script( f'document.querySelector("#password").value = " {password} "' )
+            sb.type ( "#email" , email)
+            sb.type ( "#password" , password)
             
-            logger.info(f"🔑 正在输入账户信息: {email}")
-            sb.type("#email", email)
-            sb.type("#password", password)
+            # 登录页破盾
+            current_url = sb.get_current_url()
+            logger.info( f"🛡️ 登录页启动模式: {ui_mode}破解算法..." )
+            如果ui_mode 中为“1.” ：api_core_1(current_url)
+            elif  "2."  in ui_mode: api_core_2(current_url, proxy=os.environ.get( "PROXY" ))
+            elif  "3."  in ui_mode: api_core_3(url=current_url, proxy_file= "proxy.txt" , batch_size= 3 )
+            elif  "4."  in ui_mode: api_core_4(sb)
+
+            尝试：sb.uc_gui_click_captcha()
+            例外：通过
             
-            logger.info("🖱️ 点击登录按钮...")
-            sb.click("#submit") 
-            sb.sleep(6)
+            logger.info( "🖱️点击提交登录按钮..." )
+            sb.click( "#submit" )
+            sb.sleep( 15 )
 
             # ---- [步骤 B] 跳转至 Renew 页面 ----
             logger.info(f"📡 正在跳转至服务器管理页 (ID: {server_id})...")
