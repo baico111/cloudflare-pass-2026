@@ -57,45 +57,49 @@ def send_tg_notification(status, message, photo_path=None):
 def run_auto_renew():
     email = os.environ.get("EMAIL")
     password = os.environ.get("PASSWORD")
-    ui_mode = os.environ.get("BYPASS_MODE", "1. 基础单次模式")
+    # 面板传过来的是 "1. 基础单次模式..." 这种格式
+    ui_mode = os.environ.get("BYPASS_MODE", "1.") 
     
-    # --- 核心修改：从环境变量读取动态 ID (默认为 177688) ---
     server_id = os.environ.get("SERVER_ID", "177688")
-    # --- 核心修改：读取代理变量 ---
     proxy = os.environ.get("PROXY")
     
     login_url = "https://dashboard.katabump.com/auth/login"
-    # 动态拼接目标页面 URL
     target_url = f"https://dashboard.katabump.com/servers/edit?id={server_id}"
     
     OUTPUT_DIR = Path("/app/output")
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-   with SB(uc= True , xvfb= True , proxy=proxy if proxy else  None ) as sb:
-        尝试：
+    # 这里的 proxy 处理保持与面板一致
+    with SB(uc=True, xvfb=True, proxy=proxy if proxy and "socks" in proxy else None) as sb:
+        try:
             # ---- [步骤 A] 填表登录 ----
-            logger.info( f"🚀 访问登录页: {login_url} " )
-            sb.uc_open_with_reconnect(login_url, 10 )
-            sb.wait_for_element_visible( "#email" , timeout= 25 )
-            sb.execute_script( f'document.querySelector("#email").value = " {email} "' )
-            sb.execute_script( f'document.querySelector("#password").value = " {password} "' )
-            sb.type ( "#email" , email)
-            sb.type ( "#password" , password)
+            logger.info(f"🚀 访问登录页: {login_url}")
+            sb.uc_open_with_reconnect(login_url, 10)
+            sb.wait_for_element_visible("#email", timeout=25)
             
-            # 登录页破盾
+            # 修正：将原先失效的 JS 赋值与普通输入结合，确保 Cloudflare 校验通过
+            sb.execute_script(f'document.querySelector("#email").value = "{email}"')
+            sb.execute_script(f'document.querySelector("#password").value = "{password}"')
+            sb.type("#email", email)
+            sb.type("#password", password)
+            
+            # 登录页破盾逻辑修正 (由“如果”改为“if”)
             current_url = sb.get_current_url()
-            logger.info( f"🛡️ 登录页启动模式: {ui_mode}破解算法..." )
-            如果ui_mode 中为“1.” ：api_core_1(current_url)
-            elif  "2."  in ui_mode: api_core_2(current_url, proxy=os.environ.get( "PROXY" ))
-            elif  "3."  in ui_mode: api_core_3(url=current_url, proxy_file= "proxy.txt" , batch_size= 3 )
-            elif  "4."  in ui_mode: api_core_4(sb)
-
-            尝试：sb.uc_gui_click_captcha()
-            例外：通过
+            logger.info(f"🛡️ 登录页启动模式: {ui_mode}破解算法...")
             
-            logger.info( "🖱️点击提交登录按钮..." )
-            sb.click( "#submit" )
-            sb.sleep( 15 )
+            if "1." in ui_mode: api_core_1(current_url)
+            elif "2." in ui_mode: api_core_2(current_url, proxy=proxy)
+            elif "3." in ui_mode: api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
+            elif "4." in ui_mode: api_core_4(sb)
+
+            try:
+                sb.uc_gui_click_captcha()
+            except:
+                pass
+            
+            logger.info("🖱️点击提交登录按钮...")
+            sb.click("#submit")
+            sb.sleep(15)
 
             # ---- [步骤 B] 跳转至 Renew 页面 ----
             logger.info(f"📡 正在跳转至服务器管理页 (ID: {server_id})...")
@@ -110,7 +114,7 @@ def run_auto_renew():
             current_url = sb.get_current_url()
             logger.info(f"🛡️ 当前模式: {ui_mode}，正在启动破解算法...")
             if "1." in ui_mode: result = api_core_1(current_url)
-            elif "2." in ui_mode: result = api_core_2(current_url, proxy=os.environ.get("PROXY"))
+            elif "2." in ui_mode: result = api_core_2(current_url, proxy=proxy)
             elif "3." in ui_mode: result = api_core_3(url=current_url, proxy_file="proxy.txt", batch_size=3)
             elif "4." in ui_mode: 
                 api_core_4(sb)
@@ -137,7 +141,6 @@ def run_auto_renew():
             sb.refresh()
             
             logger.info("🔍 正在定位到期日期元素...")
-            # 增加等待，确保日期元素渲染完成
             sb.wait_for_element_visible('//div[contains(text(), "Expiry")]', timeout=15)
             sb.sleep(5) 
             
@@ -150,9 +153,7 @@ def run_auto_renew():
             if "2026-" in page_source:
                 logger.info("✅ 检测到日期刷新，正在提取...")
                 try:
-                    # 锚点定位：Expiry 文本后的第一个 div 兄弟
                     expiry_date = sb.get_text('//div[contains(text(), "Expiry")]/following-sibling::div')
-                    # 强制截断，只取 10 位，彻底杀灭 katassv
                     clean_date = expiry_date.strip()[:10]
                     
                     if not clean_date.startswith("20"):
@@ -160,7 +161,6 @@ def run_auto_renew():
 
                     send_tg_notification("续期成功 ✅", f"服务器续期已生效！\n📅 **下次到期**: `{clean_date}`", final_img)
                 except:
-                    # 备选 CSS 定位 (针对可能出现的表格结构)
                     logger.info("🔄 正在尝试备选 CSS 定位抓取日期...")
                     expiry_date = sb.get_text('div.card-body div.row:nth-child(4) div.col-lg-9').strip()[:10]
                     send_tg_notification("续期成功 ✅", f"服务器续期成功！\n📅 **下次到期**: `{expiry_date}`", final_img)
