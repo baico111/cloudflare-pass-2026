@@ -29,7 +29,8 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except: pass
-    return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": "", "renew_id": ""}]
+    # 默认值增加 server_id 和 proxy
+    return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": ""}]
 
 def save_config(tasks):
     os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
@@ -53,6 +54,8 @@ st.markdown("""
     .active-tag { background-color: rgba(0, 255, 128, 0.1); color: #00ff80; border: 1px solid #00ff80; }
     @media (max-width: 768px) { [data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; min-width: 100% !important; } }
     .stTextInput>div>div>input { background-color: #000 !important; color: #00ff80 !important; font-size: 0.8rem !important; }
+    
+    /* 时间高亮加粗样式 */
     .highlight-time { color: #00e5ff !important; font-weight: 900 !important; background: rgba(0, 229, 255, 0.1); padding: 2px 5px; border-radius: 3px; }
     </style>
     """, unsafe_allow_html=True)
@@ -85,18 +88,17 @@ if 'tasks' not in st.session_state:
 with st.sidebar:
     st.header("⚙️ 终端管理")
     new_item = st.text_input("项目识别码", placeholder="识别码...")
-    script_options = ["katabump_renew.py", "luneshost.py", "pella_renew.py"]
+    script_options = ["katabump_renew.py", "luneshost.py"]
     selected_script = st.selectbox("核心脚本", script_options)
     if st.button("➕ 注入新进程"):
-        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688", "proxy": "", "renew_id": ""}
+        # new_task 增加 server_id 和 proxy
+        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688", "proxy": ""}
         if selected_script == "luneshost.py": new_task.update({"stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794"})
-        if selected_script == "pella_renew.py": new_task.update({"server_id": "2b3bbeef0eeb452299a11e431c3c2d5b", "renew_id": "m4w0wJrEmgEC"})
         st.session_state.tasks.append(new_task)
         save_config(st.session_state.tasks)
         st.rerun()
     
     st.divider()
-    # --- 还原被删除的安全设置模块 ---
     with st.expander("🔐 安全设置"):
         old_code = st.text_input("当前授权码", type="password", key="old_code")
         new_code = st.text_input("新授权码", type="password", key="new_code")
@@ -126,24 +128,16 @@ for i, task in enumerate(updated_tasks):
         head_1.markdown(status_html, unsafe_allow_html=True)
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
 
-        # --- Pella 6框平铺 vs 其他 5框平铺 ---
-        if task.get('script') == "pella_renew.py":
-            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.8, 0.8, 1.2, 1.8])
-            c1.text_input("算法模式", value="内置模式", disabled=True, key=f"algo_dis_{i}")
-            task['mode'] = "内置模式"
-            task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
-            task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
-            task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
-            task['renew_id'] = c5.text_input("续期ID", value=task.get('renew_id', 'm4w0wJrEmgEC'), key=f"rid_{i}")
-            task['proxy'] = c6.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
-        else:
-            c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
-            task['mode'] = c1.selectbox("破解算法", ["单浏览器模式 (对应脚本: simple_bypass.py)", "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "并行竞争模式 (对应脚本: bypass.py)"], key=f"mode_{i}")
-            task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
-            task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
-            task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
-            task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://...")
+        # 修改布局：增加 c5 容纳代理设置
+        c1, c2, c3, c4, c5 = st.columns([1.5, 1.8, 1.8, 0.8, 2])
+        task['mode'] = c1.selectbox("破解算法", ["单浏览器模式 (对应脚本: simple_bypass.py)", "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "并行竞争模式 (对应脚本: bypass.py)"], key=f"mode_{i}")
+        task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
+        task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
+        task['server_id'] = c4.text_input("ID", value=task.get('server_id', '177688'), key=f"sid_{i}")
+        # 新增 SOCKS5 代理输入框
+        task['proxy'] = c5.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}", placeholder="socks5://user:pass@host:port")
 
+        # --- 核心改动：周期行要在最前面 ---
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         if task.get('script') == "luneshost.py":
             lx_freq, lx1, lx2, lx3 = st.columns([1, 1, 1, 1])
@@ -155,6 +149,7 @@ for i, task in enumerate(updated_tasks):
             t_freq, t_empty1, t_empty2 = st.columns([1, 1, 1])
             task['freq'] = t_freq.number_input("周期(天)", 1, 30, task.get('freq', 3), key=f"freq_{i}")
 
+        # --- 时间显示（带高亮） ---
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         t_time1, t_time2 = st.columns(2)
         last = task.get('last_run', "从未运行")
@@ -173,37 +168,29 @@ for i, task in enumerate(updated_tasks):
         if btn_1.button("💾 保存", key=f"save_{i}"):
             save_config(updated_tasks)
             st.toast(f"{task['name']} 已保存")
-            
         if btn_2.button("🚀 同步", key=f"run_{i}"):
             log_area = st.empty()
             with st.status(f"同步中...", expanded=True) as status:
                 env = os.environ.copy()
                 env.update({"EMAIL": task['email'], "PASSWORD": task['password'], "BYPASS_MODE": task['mode'], "PYTHONUNBUFFERED": "1"})
-                env.update({"SERVER_ID": str(task.get('server_id', '')), "PROXY": str(task.get('proxy', '')), "RENEW_ID": str(task.get('renew_id', ''))})
-                if task.get('script') == "pella_renew.py":
-                    env.update({"PELLA_EMAIL": task['email'], "GMAIL_APP_PASSWORD": task['password']})
+                # 将 SERVER_ID 和 PROXY 注入环境变量
+                env.update({"SERVER_ID": str(task.get('server_id', '177688'))})
+                env.update({"PROXY": str(task.get('proxy', ''))})
                 if task.get('script') == "luneshost.py":
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
-                
                 process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
                 full_log = ""
                 for line in process.stdout:
                     full_log += line
                     log_area.code("\n".join(full_log.splitlines()[-6:]))
                 process.wait()
-                
-                # 配合 scheduler 逻辑：只有真正的 Pella 成功标记才更新 UI
-                should_update_ui = True
-                if task.get('script') == "pella_renew.py" and "PELLA_SUCCESS_FLAG" not in full_log:
-                    should_update_ui = False
-                
-                if process.returncode == 0 and should_update_ui:
+                if process.returncode == 0:
                     task['last_run'] = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
                     save_config(updated_tasks)
                     status.update(label="成功", state="complete")
                     st.rerun()
                 else:
-                    status.update(label="任务完成 (未触发时间更新)", state="complete")
+                    status.update(label="成功", state="complete")
                     st.rerun()
 
         if btn_3.button("🗑️ 移除", key=f"del_{i}"):
