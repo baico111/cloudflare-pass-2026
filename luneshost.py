@@ -1,5 +1,7 @@
 import os
 import time
+import shutil
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import requests
@@ -7,7 +9,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. 核心 API 导入 (完全保持原样)
+# 1. 核心 API 导入 (完全不改)
 # ==========================================
 try:
     from bypass import bypass_cloudflare as api_core_1
@@ -19,13 +21,28 @@ except Exception as e:
     logger.error(f"🚨 API 加载失败: {e}")
 
 # ==========================================
-# 2. TG 通知功能 (完全保持原样)
+# 2. TG 通知功能 (✨ 注入：精准对齐 CF Worker 中转)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
+    # ✨ 从环境变量获取 CF 中转配置 (由 app.py 注入)
+    cf_proxy_url = os.environ.get("TG_PROXY_URL") # https://tgtgcf.yilovesky521.workers.dev
+    cf_auth_key = os.environ.get("TG_AUTH_KEY")   # Sky315989021
+    
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    
+    # 按照 CF 代码要求构建中转路径：域名/Token/方法
+    if cf_proxy_url and cf_auth_key:
+        target_base = f"{cf_proxy_url}/{token}"
+        headers = {"X-Custom-Auth": cf_auth_key}
+    else:
+        # 兜底：若环境变量缺失则直连
+        target_base = f"https://api.telegram.org/bot{token}"
+        headers = {}
+
     if not (token and chat_id): return
     
+    # 强制锁死北京时间 (UTC+8)
     tz_bj = timezone(timedelta(hours=8))
     bj_time = datetime.now(tz_bj).strftime('%Y-%m-%d %H:%M:%S')
     emoji = "✅" if "成功" in status else "⚠️" if "执行中" in status else "❌"
@@ -43,20 +60,22 @@ def send_tg_notification(status, message, photo_path=None):
     try:
         if photo_path and os.path.exists(photo_path):
             with open(photo_path, 'rb') as f:
-                requests.post(f"https://api.telegram.org/bot{token}/sendPhoto", 
-                              data={'chat_id': chat_id, 'caption': formatted_msg, 'parse_mode': 'Markdown'}, files={'photo': f})
+                # 拼接发送图片路径：/sendPhoto
+                requests.post(f"{target_base}/sendPhoto", 
+                              data={'chat_id': chat_id, 'caption': formatted_msg, 'parse_mode': 'Markdown'}, 
+                              headers=headers,
+                              files={'photo': f}, timeout=30)
         else:
-            requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
-                          data={'chat_id': chat_id, 'text': formatted_msg, 'parse_mode': 'Markdown'})
+            # 拼接发送文字路径：/sendMessage
+            requests.post(f"{target_base}/sendMessage", 
+                          data={'chat_id': chat_id, 'text': formatted_msg, 'parse_mode': 'Markdown'}, 
+                          headers=headers,
+                          timeout=30)
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
 # 3. 自动化续期主流程 (一步到位版)
 # ==========================================
-# 适配 HF：显式锁定输出路径
-OUTPUT_DIR = Path("/app/output")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
 def run_auto_renew():
     email = os.environ.get("EMAIL")
     password = os.environ.get("PASSWORD")
@@ -65,13 +84,20 @@ def run_auto_renew():
     refresh_count = int(os.environ.get("REFRESH_COUNT", 3))
     refresh_interval = int(os.environ.get("REFRESH_INTERVAL", 5))
 
-    # --- 从环境变量获取 ID 并动态合成 URL ---
     server_id = os.environ.get("SERVER_ID", "52794")
-    # --- 读取代理变量 ---
     proxy = os.environ.get("PROXY")
     target_server_url = f"https://betadash.lunes.host/servers/{server_id}"
 
-    # 在 SB 启动时挂载代理隧道
+    # 💡 核心修改：按账号建立独立文件夹并自动清理
+    # 路径格式：/app/output/LunesHost/账号名/
+    account_prefix = email.split('@')[0] if email else "default"
+    OUTPUT_DIR = Path(f"/app/output/LunesHost/{account_prefix}")
+    
+    if OUTPUT_DIR.exists():
+        logger.info(f"🧹 正在自动清理 LunesHost 旧截图缓存...")
+        shutil.rmtree(OUTPUT_DIR)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
             # 第一步：直接访问详情页，系统会自动带你去登录页
@@ -96,7 +122,7 @@ def run_auto_renew():
             try: sb.uc_gui_click_captcha()
             except: logger.warning("⚠️ 验证码点击跳过或未检测到")
             
-            # 第四步：点击登录
+            # 第四步：点击登录，登录成功后系统会自动返回到详情页
             logger.info("🖱️ 点击提交登录，等待系统自动回跳详情页...")
             sb.click('button.submit-btn')
             
@@ -113,18 +139,22 @@ def run_auto_renew():
                 sb.refresh()
                 sb.sleep(refresh_interval)
 
-            # 第六步：保存成果并报告
+            # 第六步：保存成果并报告 (保存在账号独立文件夹)
             logger.info("📸 任务接近尾声，正在保存成果截图...")
-            final_img = str(OUTPUT_DIR / "final_result.png")
-            sb.save_screenshot(final_img)
+            # ✨ 物理对齐：存入根目录供 app.py 同步，存入账号文件夹供审计
+            final_img_name = "final_result.png"
+            sb.save_screenshot(final_img_name)
+            shutil.copy(final_img_name, str(OUTPUT_DIR / final_img_name))
+            
             logger.info("✅ 流程执行完毕，发送 TG 成功报告")
-            send_tg_notification("保活成功 ✅", f"服务器续期访问成功！", final_img)
+            send_tg_notification("保活成功 ✅", f"服务器续期访问成功！", final_img_name)
 
         except Exception as e:
             logger.error(f"🔥 任务异常中断: {str(e)}")
-            error_img = str(OUTPUT_DIR / "error.png")
-            sb.save_screenshot(error_img)
-            send_tg_notification("执行异常 ❌", f"错误详情: `{str(e)}`", error_img)
+            error_img_name = "error.png"
+            sb.save_screenshot(error_img_name)
+            shutil.copy(error_img_name, str(OUTPUT_DIR / error_img_name))
+            send_tg_notification("执行异常 ❌", f"错误详情: `{str(e)}`", error_img_name)
             raise e
 
 if __name__ == "__main__":
