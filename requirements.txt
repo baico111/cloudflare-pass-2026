@@ -11,6 +11,9 @@ streamlit>=1.30.0       # 构建高科技感管理后台
 requests                # 用于 Telegram 消息推送及 API 调用
 imaplib2                # 补强：确保 Gmail 验证码抓取更加稳定 (可选)
 
+# --- Hugging Face 适配补充 (适配必须) ---
+huggingface-hub         # 核心：用于将配置文件同步到数据集 (Dataset)
+
 # --- 兼容性补充 (已按需清理) ---
 # PyAutoGUI             # 已移除：Headless 环境不兼容
 # PySimpleGUI           # 已移除：已使用 Streamlit
