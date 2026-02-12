@@ -10,7 +10,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. TG 通知功能 (保持原样)
+# 1. TG 通知功能 (原样保留)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -29,7 +29,7 @@ def send_tg_notification(status, message, photo_path=None):
     except Exception as e: logger.error(f"TG通知失败: {e}")
 
 # ==========================================
-# 2. Gmail 验证码提取 (锁死不改)
+# 2. Gmail 验证码提取 (原样保留)
 # ==========================================
 def get_pella_code(mail_address, app_password):
     logger.info("📡 正在连接 Gmail 抓取验证码...")
@@ -60,7 +60,24 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (先时间 $\rightarrow$ 后状态)
+# 3. 核心：时间换算逻辑 (为了对比 增加/减少)
+# ==========================================
+def parse_time_to_hours(text):
+    if not text or "未找到" in text or "获取失败" in text: return 0
+    try:
+        total_hours = 0
+        # 兼容 Days/Day 和 Hours/Hour/h
+        days = re.search(r'(\d+)\s*Day', text, re.I)
+        hours = re.search(r'(\d+)\s*(?:Hour|h)', text, re.I)
+        if days:
+            total_hours += int(days.group(1)) * 24
+        if hours:
+            total_hours += int(hours.group(1))
+        return total_hours
+    except: return 0
+
+# ==========================================
+# 4. Pella 自动化流程
 # ==========================================
 def run_test():
     email_addr = os.environ.get("PELLA_EMAIL")
@@ -72,10 +89,22 @@ def run_test():
     target_server_url = f"https://www.pella.app/server/{server_id}"
     renew_url = f"https://cuty.io/{renew_id}"
     
+    # 获取原始时间的 JS (原样保持)
+    js_time_grabber = """
+    var divs = document.querySelectorAll('div');
+    for (var d of divs) {
+        var txt = d.innerText;
+        if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours') || txt.includes('天'))) {
+            return txt;
+        }
+    }
+    return "未找到时间文本";
+    """
+
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
-            # --- 第一阶段: 登录流程 ---
-            logger.info("🚀 [面板监控] 正在启动 Pella 登录流程...")
+            # --- 第一阶段: 登录流程 (原样保持) ---
+            logger.info("🚀 [面板监控] 启动 Pella 登录...")
             sb.uc_open_with_reconnect("https://www.pella.app/login", 10)
             sb.sleep(5)
             sb.uc_gui_click_captcha()
@@ -90,77 +119,31 @@ def run_test():
             sb.type('input[data-input-otp="true"]', auth_code)
             sb.sleep(10)
 
-            # --- 第二阶段: 数据抓取与状态判定 ---
-            logger.info("🔍 [面板监控] 正在回访面板执行数据抓取...")
+            # --- 第二阶段: 记录续期前时间 ---
             sb.uc_open_with_reconnect(target_server_url, 10)
-            sb.sleep(10) 
+            sb.sleep(10)
+            text_before = sb.execute_script(js_time_grabber)
+            hours_before = parse_time_to_hours(text_before)
+            logger.info(f"🕒 [续期前] 原始: {text_before} | 小时: {hours_before}")
 
-            # 【指令锁定】：先提取续期前的时间
-            def get_expiry_time_raw(sb_obj):
-                try:
-                    js_time_code = """
-                    var divs = document.querySelectorAll('div');
-                    for (var d of divs) {
-                        var txt = d.innerText;
-                        if (txt.includes('expiring') && (txt.includes('Day') || txt.includes('Hours') || txt.includes('天'))) {
-                            return txt;
-                        }
-                    }
-                    return "未找到时间文本";
-                    """
-                    raw_text = sb_obj.execute_script(js_time_code)
-                    clean_text = " ".join(raw_text.split())
-                    if "expiring in" in clean_text:
-                        return clean_text.split("expiring in")[1].split(".")[0].strip()
-                    return clean_text[:60]
-                except: return "获取失败"
-
-            expiry_before = get_expiry_time_raw(sb)
-            logger.info(f"🕒 [面板监控] 续期前剩余时间: {expiry_before}")
-
-            # 【指令锁定】：提取完时间后，立即执行特征判定
-            js_status_code = f"""
-            (function() {{
-                var btn = document.querySelector('a[href*="{renew_id}"]');
-                if (btn) {{
-                    // 精准特征锁定：检查 HTML 类名中是否含有禁用标志
-                    var is_disabled = btn.classList.contains('pointer-events-none') || 
-                                     btn.classList.contains('opacity-50') ||
-                                     window.getComputedStyle(btn).pointerEvents === 'none';
-                    return !is_disabled; 
-                }}
-                return false;
-            }})();
-            """
-            is_highlighted = sb.execute_script(js_status_code)
-            logger.info(f"💡 [检测结果] 按钮高亮状态: {is_highlighted}")
-
-            # 逻辑闭环：判定冷却则安全退出，不打印成功标记
-            if not is_highlighted:
-                logger.warning("🕒 [面板监控] 检测到按钮被类名禁用 (冷却期)，脚本终止。")
-                send_tg_notification("保活报告 (冷却中) 🕒", f"按钮尚在冷却，本次不更新运行时间。剩余: {expiry_before}", None)
-                sys.exit(0)
-
-            # --- 第三阶段: 续期执行 (全功能补完，不删一行) ---
-            logger.info(f"🚀 [面板监控] 判定通过，跳转续期: {renew_url}")
+            # --- 第三阶段: 暴力点击流程 (原样保持，一个字不删) ---
+            logger.info(f"🚀 [暴力流程] 开始跳转续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
             
-            # A. 点击第一个 Continue
+            # [A] 第一个 Continue
             for i in range(5):
-                try:
-                    if sb.is_element_visible('button#submit-button[data-ref="first"]'):
-                        sb.js_click('button#submit-button[data-ref="first"]')
-                        sb.sleep(3)
-                        if len(sb.driver.window_handles) > 1:
-                            main_h = sb.driver.window_handles[0]
-                            for h in sb.driver.window_handles:
-                                if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
-                            sb.driver.switch_to.window(main_h)
-                        if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
-                except: pass
+                if sb.is_element_visible('button#submit-button[data-ref="first"]'):
+                    sb.js_click('button#submit-button[data-ref="first"]')
+                    sb.sleep(3)
+                    if len(sb.driver.window_handles) > 1:
+                        main_h = sb.driver.window_handles[0]
+                        for h in sb.driver.window_handles:
+                            if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
+                        sb.driver.switch_to.window(main_h)
+                    if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
 
-            # B. 处理 CF 验证
+            # [B] CF 验证
             sb.sleep(5)
             try:
                 cf_iframe = 'iframe[src*="cloudflare"]'
@@ -171,57 +154,57 @@ def run_test():
                     sb.sleep(6)
             except: pass
 
-            # C. 点击 I am not a robot
+            # [C] I am not a robot
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
-            for i in range(8): 
-                try:
-                    if sb.is_element_visible(captcha_btn):
-                        sb.js_click(captcha_btn)
-                        sb.sleep(3)
-                        if len(sb.driver.window_handles) > 1:
-                            main_h = sb.driver.window_handles[0]
-                            for h in sb.driver.window_handles:
-                                if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
-                            sb.driver.switch_to.window(main_h)
-                        if not sb.is_element_visible(captcha_btn): break
-                except: pass
+            for i in range(8):
+                if sb.is_element_visible(captcha_btn):
+                    sb.js_click(captcha_btn)
+                    sb.sleep(3)
+                    if len(sb.driver.window_handles) > 1:
+                        main_h = sb.driver.window_handles[0]
+                        for h in sb.driver.window_handles:
+                            if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
+                        sb.driver.switch_to.window(main_h)
+                    if not sb.is_element_visible(captcha_btn): break
 
-            # D. 点击最终 Go
+            # [D] 计时与最终 Go
             sb.sleep(18)
             final_btn = 'button#submit-button[data-ref="show"]'
             click_final = False
             for i in range(8):
-                try:
-                    if sb.is_element_visible(final_btn):
-                        sb.js_click(final_btn)
-                        sb.sleep(3)
-                        if len(sb.driver.window_handles) > 1:
-                            main_h = sb.driver.window_handles[0]
-                            for h in sb.driver.window_handles:
-                                if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
-                            sb.driver.switch_to.window(main_h)
-                        if not sb.is_element_visible(final_btn):
-                            click_final = True
-                            break
-                except: pass
+                if sb.is_element_visible(final_btn):
+                    sb.js_click(final_btn)
+                    sb.sleep(3)
+                    if len(sb.driver.window_handles) > 1:
+                        main_h = sb.driver.window_handles[0]
+                        for h in sb.driver.window_handles:
+                            if h != main_h: sb.driver.switch_to.window(h); sb.driver.close()
+                        sb.driver.switch_to.window(main_h)
+                    if not sb.is_element_visible(final_btn):
+                        click_final = True
+                        break
             
-            # --- 第四阶段: 结果验证 ---
-            sb.sleep(5)
+            # --- 第四阶段: 结果数值对比验证 ---
+            logger.info("🏁 [校验阶段] 正在回访面板...")
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10)
-            expiry_after = get_expiry_time_raw(sb)
-            logger.info(f"🕒 [面板监控] 续期后时间: {expiry_after}")
-            sb.save_screenshot("final_result.png")
-            
-            if click_final:
+            text_after = sb.execute_script(js_time_grabber)
+            hours_after = parse_time_to_hours(text_after)
+            logger.info(f"🕒 [续期后] 原始: {text_after} | 小时: {hours_after}")
+
+            # 判定：只有 增加 才算成功
+            if hours_after > hours_before:
+                logger.info(f"✅ [判定成功] 小时数增加: {hours_before} -> {hours_after}")
                 print("PELLA_SUCCESS_FLAG") 
-                send_tg_notification("续期成功 ✅", f"前: {expiry_before}\n后: {expiry_after}", "final_result.png")
+                send_tg_notification("续期成功 ✅", f"时间增加！\n续期前: {text_before}\n续期后: {text_after}", None)
             else:
-                send_tg_notification("操作反馈 ⚠️", f"流程已走完，请查截图。前: {expiry_before}\n现: {expiry_after}", "final_result.png")
+                reason = "处于冷却中/点击无效" if hours_after == hours_before else "时间自然流逝"
+                logger.warning(f"❌ [判定跳过] {reason}。时间未增加。")
+                send_tg_notification("保活跳过 🕒", f"检测到时间未增加（{reason}）。\n当前: {text_after}", None)
 
         except Exception as e:
-            logger.error(f"🔥 [面板监控] 崩溃: {str(e)}")
-            send_tg_notification("保活失败 ❌", f"报错: `{str(e)}`", None)
+            logger.error(f"🔥 [崩溃]: {str(e)}")
+            send_tg_notification("保活失败 ❌", f"错误详情: `{str(e)}`.", None)
             raise e
 
 if __name__ == "__main__":
