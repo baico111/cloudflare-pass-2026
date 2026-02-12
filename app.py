@@ -4,11 +4,46 @@ import os
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from huggingface_hub import hf_hub_download, upload_file  # 适配 HF 必须增加的库
 
 # 配置文件路径
 CONFIG_FILE = "/app/output/tasks_config.json"
 # 授权码持久化路径
 AUTH_FILE = "/app/output/auth_config.json"
+
+# --- 新增：HF 数据集同步逻辑 (适配 HF 必须，不影响原逻辑) ---
+HF_DATASET_ID = os.environ.get("HF_DATASET_ID") 
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
+def sync_from_cloud():
+    """启动时从数据集下载配置"""
+    if HF_TOKEN and HF_DATASET_ID:
+        for f_name in ["tasks_config.json", "auth_config.json"]:
+            try:
+                hf_hub_download(
+                    repo_id=HF_DATASET_ID,
+                    filename=f_name,
+                    local_dir="/app/output",
+                    repo_type="dataset",
+                    token=HF_TOKEN
+                )
+            except: pass
+
+def sync_to_cloud(filename):
+    """保存时同步到云端数据集"""
+    if HF_TOKEN and HF_DATASET_ID:
+        try:
+            upload_file(
+                path_or_fileobj=f"/app/output/{filename}",
+                path_in_repo=filename,
+                repo_id=HF_DATASET_ID,
+                repo_type="dataset",
+                token=HF_TOKEN
+            )
+        except: pass
+
+# 初始同步动作
+sync_from_cloud()
 
 def load_auth():
     if os.path.exists(AUTH_FILE):
@@ -22,6 +57,7 @@ def save_auth(new_code):
     os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
     with open(AUTH_FILE, 'w') as f:
         json.dump({"access_code": new_code}, f)
+    sync_to_cloud("auth_config.json") # 适配 HF：保存即同步
 
 def load_config():
     if os.path.exists(CONFIG_FILE):
@@ -37,11 +73,12 @@ def save_config(tasks):
     with open(temp_file, 'w', encoding='utf-8') as f:
         json.dump(tasks, f, ensure_ascii=False, indent=2)
     os.replace(temp_file, CONFIG_FILE)
+    sync_to_cloud("tasks_config.json") # 适配 HF：保存即同步
 
-# --- 页面全局配置 ---
+# --- 页面全局配置 (以下完全维持原样) ---
 st.set_page_config(page_title="矩阵自动化控制内核", layout="wide", initial_sidebar_state="expanded")
 
-# --- 响应式 CSS (微缩版) ---
+# --- 响应式 CSS (微缩版) (保持原样) ---
 st.markdown("""
     <style>
     .main { background-color: #05070a; color: #a0aec0; font-size: 0.85rem; }
@@ -57,7 +94,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 登录鉴权 ---
+# --- 登录鉴权 (保持原样) ---
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
@@ -81,7 +118,7 @@ st.title("🛡️ 矩阵自动化控制内核")
 if 'tasks' not in st.session_state:
     st.session_state.tasks = load_config()
 
-# --- 侧边栏：管理与改密 ---
+# --- 侧边栏：管理与改密 (保持原样) ---
 with st.sidebar:
     st.header("⚙️ 终端管理")
     new_item = st.text_input("项目识别码", placeholder="识别码...")
@@ -96,7 +133,6 @@ with st.sidebar:
         st.rerun()
     
     st.divider()
-    # --- 还原被删除的安全设置模块 ---
     with st.expander("🔐 安全设置"):
         old_code = st.text_input("当前授权码", type="password", key="old_code")
         new_code = st.text_input("新授权码", type="password", key="new_code")
@@ -115,7 +151,7 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-# --- 任务轨道监控 ---
+# --- 任务轨道监控 (保持原样) ---
 updated_tasks = st.session_state.tasks
 bj_tz = timezone(timedelta(hours=8))
 
@@ -126,7 +162,6 @@ for i, task in enumerate(updated_tasks):
         head_1.markdown(status_html, unsafe_allow_html=True)
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
 
-        # --- Pella 6框平铺 vs 其他 5框平铺 ---
         if task.get('script') == "pella_renew.py":
             c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.8, 0.8, 1.2, 1.8])
             c1.text_input("算法模式", value="内置模式", disabled=True, key=f"algo_dis_{i}")
@@ -192,7 +227,6 @@ for i, task in enumerate(updated_tasks):
                     log_area.code("\n".join(full_log.splitlines()[-6:]))
                 process.wait()
                 
-                # 配合 scheduler 逻辑：只有真正的 Pella 成功标记才更新 UI
                 should_update_ui = True
                 if task.get('script') == "pella_renew.py" and "PELLA_SUCCESS_FLAG" not in full_log:
                     should_update_ui = False
