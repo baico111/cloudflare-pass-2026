@@ -10,7 +10,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. TG 通知功能 (锁死不改)
+# 1. TG 通知功能 (保持原样)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -60,7 +60,7 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. Pella 自动化流程 (重构版：先时间后状态)
+# 3. Pella 自动化流程 (先时间 $\rightarrow$ 后状态)
 # ==========================================
 def run_test():
     email_addr = os.environ.get("PELLA_EMAIL")
@@ -95,7 +95,7 @@ def run_test():
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10) 
 
-            # 【指令修正】：先提取续期前的时间
+            # 【指令锁定】：先提取续期前的时间
             def get_expiry_time_raw(sb_obj):
                 try:
                     js_time_code = """
@@ -118,29 +118,31 @@ def run_test():
             expiry_before = get_expiry_time_raw(sb)
             logger.info(f"🕒 [面板监控] 续期前剩余时间: {expiry_before}")
 
-            # 【指令修正】：抓完时间后，紧接着进行状态判定
+            # 【指令锁定】：提取完时间后，立即执行特征判定
             js_status_code = f"""
             (function() {{
                 var btn = document.querySelector('a[href*="{renew_id}"]');
                 if (btn) {{
+                    // 精准特征锁定：检查 HTML 类名中是否含有禁用标志
                     var is_disabled = btn.classList.contains('pointer-events-none') || 
-                                     btn.classList.contains('opacity-50');
-                    return !is_disabled; // 返回是否高亮
+                                     btn.classList.contains('opacity-50') ||
+                                     window.getComputedStyle(btn).pointerEvents === 'none';
+                    return !is_disabled; 
                 }}
                 return false;
             }})();
             """
             is_highlighted = sb.execute_script(js_status_code)
-            logger.info(f"💡 [按钮检测] 当前高亮状态: {is_highlighted}")
+            logger.info(f"💡 [检测结果] 按钮高亮状态: {is_highlighted}")
 
-            # 熔断逻辑：如果没亮，发送通知并直接退出，不更新调度时间
+            # 逻辑闭环：判定冷却则安全退出，不打印成功标记
             if not is_highlighted:
-                logger.warning("🕒 [面板监控] 检测到按钮处于冷却中，终止流程。")
-                send_tg_notification("保活报告 (冷却中) 🕒", f"按钮尚未高亮。本次不更新运行时间。剩余时间: {expiry_before}", None)
+                logger.warning("🕒 [面板监控] 检测到按钮被类名禁用 (冷却期)，脚本终止。")
+                send_tg_notification("保活报告 (冷却中) 🕒", f"按钮尚在冷却，本次不更新运行时间。剩余: {expiry_before}", None)
                 sys.exit(0)
 
-            # --- 第三阶段: 续期执行 (全功能补完) ---
-            logger.info(f"🚀 [面板监控] 跳转续期网站: {renew_url}")
+            # --- 第三阶段: 续期执行 (全功能补完，不删一行) ---
+            logger.info(f"🚀 [面板监控] 判定通过，跳转续期: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
             
@@ -158,7 +160,7 @@ def run_test():
                         if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
                 except: pass
 
-            # B. 处理 CF
+            # B. 处理 CF 验证
             sb.sleep(5)
             try:
                 cf_iframe = 'iframe[src*="cloudflare"]'
@@ -184,7 +186,7 @@ def run_test():
                         if not sb.is_element_visible(captcha_btn): break
                 except: pass
 
-            # D. 等待并点击最终 Go
+            # D. 点击最终 Go
             sb.sleep(18)
             final_btn = 'button#submit-button[data-ref="show"]'
             click_final = False
@@ -208,18 +210,18 @@ def run_test():
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10)
             expiry_after = get_expiry_time_raw(sb)
-            logger.info(f"🕒 [面板监控] 续期后剩余时间: {expiry_after}")
+            logger.info(f"🕒 [面板监控] 续期后时间: {expiry_after}")
             sb.save_screenshot("final_result.png")
             
             if click_final:
-                print("PELLA_SUCCESS_FLAG") # 唯一触发更新标记
-                send_tg_notification("续期成功 ✅", f"续期前: {expiry_before}\n续期后: {expiry_after}", "final_result.png")
+                print("PELLA_SUCCESS_FLAG") 
+                send_tg_notification("续期成功 ✅", f"前: {expiry_before}\n后: {expiry_after}", "final_result.png")
             else:
-                send_tg_notification("操作反馈 ⚠️", f"流程已结束，请检查截图。前: {expiry_before}\n当前: {expiry_after}", "final_result.png")
+                send_tg_notification("操作反馈 ⚠️", f"流程已走完，请查截图。前: {expiry_before}\n现: {expiry_after}", "final_result.png")
 
         except Exception as e:
-            logger.error(f"🔥 [面板监控] 流程崩溃: {str(e)}")
-            send_tg_notification("保活失败 ❌", f"错误: `{str(e)}`", None)
+            logger.error(f"🔥 [面板监控] 崩溃: {str(e)}")
+            send_tg_notification("保活失败 ❌", f"报错: `{str(e)}`", None)
             raise e
 
 if __name__ == "__main__":
