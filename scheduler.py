@@ -2,60 +2,65 @@ import json
 import os
 import subprocess
 from datetime import datetime, timedelta, timezone
-from huggingface_hub import hf_hub_download, upload_file  # 适配 HF 必须增加
+from pathlib import Path
+from huggingface_hub import hf_hub_download, upload_file
 
-# 配置文件路径，必须与 app.py 保持一致
-CONFIG_FILE = "/app/output/tasks_config.json"
+# 配置文件根目录 (保持原样)
+OUTPUT_DIR = "/app/output"
 
-# --- 新增：HF 数据集同步逻辑 (适配 HF 必须) ---
+# --- HF 数据集同步逻辑 (保持原样) ---
 HF_DATASET_ID = os.environ.get("HF_DATASET_ID") 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
-def sync_from_cloud():
-    """执行前同步配置"""
-    if HF_TOKEN and HF_DATASET_ID:
-        try:
-            hf_hub_download(repo_id=HF_DATASET_ID, filename="tasks_config.json", 
-                            local_dir="/app/output", repo_type="dataset", token=HF_TOKEN)
-        except: pass
+# ✨ 锁死 CF 配置 (对齐 app.py)
+CF_TG_BASE_URL = os.environ.get("TG_PROXY_URL", "https://tgtgcf.yilovesky521.workers.dev")
+CF_SECRET_KEY = os.environ.get("TG_AUTH_KEY", "Sky315989021")
 
-def sync_to_cloud():
-    """更新后同步到云端"""
+def sync_from_cloud():
+    """✨ 物理拉取云端最新状态"""
     if HF_TOKEN and HF_DATASET_ID:
         try:
-            upload_file(path_or_fileobj=CONFIG_FILE, path_in_repo="tasks_config.json", 
+            os.makedirs(OUTPUT_DIR, exist_ok=True)
+            for f in ["tasks_config.json", "auth_config.json"]:
+                hf_hub_download(repo_id=HF_DATASET_ID, filename=f, 
+                                local_dir=OUTPUT_DIR, repo_type="dataset", token=HF_TOKEN)
+            print("[+] 云端时间表同步完成")
+        except Exception as e: print(f"[!] 云端拉取失败: {e}")
+
+def sync_to_cloud(local_full_path, repo_path):
+    if HF_TOKEN and HF_DATASET_ID:
+        try:
+            upload_file(path_or_fileobj=local_full_path, path_in_repo=repo_path, 
                         repo_id=HF_DATASET_ID, repo_type="dataset", token=HF_TOKEN)
         except: pass
 
 def run_scheduler():
-    # 适配 HF：每次调度前先拉取最新配置（防止 app.py 刚改过）
+    # ✨ 核心接电：先同步
     sync_from_cloud()
 
-    if not os.path.exists(CONFIG_FILE):
-        print("[*] 尚未配置任何任务，调度器进入待命状态。")
+    status_files = list(Path(OUTPUT_DIR).rglob("*.status.json"))
+    
+    if not status_files:
+        print("[*] 尚未发现任何账号配置文件，调度器待命。")
         return
 
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            tasks = json.load(f)
-    except Exception as e:
-        print(f"[!] 读取配置文件失败: {e}")
-        return
-
-    # --- 核心锁定：强制使用北京时间 (UTC+8) (保持原样) ---
     bj_tz = timezone(timedelta(hours=8))
     now = datetime.now(bj_tz)
-    updated = False
 
-    for task in tasks:
-        # 1. 检查任务是否激活
+    for config_path in status_files:
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                task = json.load(f)
+        except Exception as e:
+            print(f"[!] 读取 {config_path.name} 失败: {e}")
+            continue
+
         if not task.get('active', True): 
             continue
         
         last_run_str = task.get('last_run')
         freq = task.get('freq', 3)
         
-        # 2. 自动化执行逻辑判断 (保持原样)
         should_run = False
         if not last_run_str or last_run_str == "从未运行":
             should_run = True
@@ -65,28 +70,36 @@ def run_scheduler():
                 if now >= (last_run_time + timedelta(days=freq)):
                     should_run = True
             except (ValueError, TypeError):
-                print(f"[!] 检测到无效的时间记录 '{last_run_str}'，正在强制触发以修复数据...")
                 should_run = True
 
         if should_run:
-            # 3. 模式与脚本名提取 (保持原样)
+            for old in ["final_result.png", "error.png"]:
+                if os.path.exists(old): os.remove(old)
+
             selected_mode = task.get('mode', '单浏览器模式 (对应脚本: simple_bypass.py)')
             script_name = task.get('script', 'katabump_renew.py')
-            print(f"[*] [周期任务启动] 项目: {task['name']} | 脚本: {script_name}")
+            print(f"[*] [后台保活启动] 账号: {task.get('email')} | 脚本: {script_name}")
             
-            # 4. 环境变量注入 (保持原样)
             env = os.environ.copy()
-            env["EMAIL"] = task['email']
-            env["PASSWORD"] = task['password']
-            env["BYPASS_MODE"] = selected_mode 
-            env["PYTHONUNBUFFERED"] = "1"
-            env["SERVER_ID"] = str(task.get('server_id', '177688'))
-            env["PROXY"] = task.get('proxy', '')
-            env["RENEW_ID"] = task.get('renew_id', '')
+            # ✨✨✨ 物理接通核心：强制注入 CF 代理全套环境变量 ✨✨✨
+            env.update({
+                "EMAIL": str(task['email']), 
+                "PASSWORD": str(task['password']), 
+                "BYPASS_MODE": str(selected_mode), 
+                "PYTHONUNBUFFERED": "1",
+                "SERVER_ID": str(task.get('server_id', '177688')),
+                "PROXY": str(task.get('proxy', '')),
+                "RENEW_ID": str(task.get('renew_id', '')),
+                # 🔥 这里是命门：物理对齐 CF 代理环境变量名
+                "TG_PROXY_URL": str(CF_TG_BASE_URL),
+                "TG_AUTH_KEY": str(CF_SECRET_KEY),
+                "TELEGRAM_BOT_TOKEN": str(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
+                "TELEGRAM_CHAT_ID": str(os.environ.get("TELEGRAM_CHAT_ID", ""))
+            })
 
             if script_name == "pella_renew.py":
-                env["PELLA_EMAIL"] = task['email']
-                env["GMAIL_APP_PASSWORD"] = task['password']
+                env["PELLA_EMAIL"] = str(task['email'])
+                env["GMAIL_APP_PASSWORD"] = str(task['password'])
             
             if script_name == "luneshost.py":
                 env["STAY_TIME"] = str(task.get('stay_time', 10))
@@ -94,29 +107,34 @@ def run_scheduler():
                 env["REFRESH_INTERVAL"] = str(task.get('refresh_interval', 5))
             
             try:
-                # 5. 进程执行 (保持原样)
                 subprocess.run([
                     "xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", 
                     "python", script_name
                 ], env=env, check=True)
                 
+                proj_name, email = script_name.replace('.py', ''), task['email']
+                if os.path.exists("final_result.png"):
+                    sync_to_cloud("final_result.png", f"{proj_name}/{email}.png")
+                
                 task['last_run'] = now.strftime("%Y-%m-%d %H:%M:%S")
-                updated = True
-                print(f"[+] {task['name']} 自动同步成功。")
-            except Exception as e:
-                print(f"[!] {task['name']} 自动执行失败: {e}")
+                # ✨ 注入 next_run 物理字段 (同步 app.py 逻辑)
+                try:
+                    next_dt = now + timedelta(days=task['freq'])
+                    task['next_run'] = next_dt.strftime('%Y-%m-%d %H:%M:%S')
+                except: pass
 
-    # 6. 写回 JSON 文件并同步云端
-    if updated:
-        try:
-            temp_file = CONFIG_FILE + ".tmp"
-            with open(temp_file, 'w', encoding='utf-8') as f:
-                json.dump(tasks, f, ensure_ascii=False, indent=2)
-            os.replace(temp_file, CONFIG_FILE)
-            sync_to_cloud() # 适配 HF：时间更新后同步备份
-            print("[*] 任务配置已同步更新至云端。")
-        except Exception as e:
-            print(f"[!] 写入配置文件失败: {e}")
+                with open(config_path, 'w', encoding='utf-8') as f:
+                    json.dump(task, f, ensure_ascii=False, indent=2)
+                
+                repo_path = str(config_path.relative_to(OUTPUT_DIR))
+                sync_to_cloud(str(config_path), repo_path)
+                print(f"[+] {email} 后台续期成功，云端已对齐。")
+
+            except Exception as e:
+                proj_name, email = script_name.replace('.py', ''), task['email']
+                if os.path.exists("error.png"):
+                    sync_to_cloud("error.png", f"{proj_name}/{email}_error.png")
+                print(f"[!] {email} 后台执行失败: {e}")
 
 if __name__ == "__main__":
     run_scheduler()
