@@ -60,14 +60,14 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. 辅助功能：数值换算与弹窗强杀
+# 3. 辅助功能：数值换算、弹窗强杀、盾牌拆除
 # ==========================================
 def parse_time_to_hours(text):
     if not text or "未找到" in text: return 0
     try:
         total_hours = 0
         days = re.search(r'(\d+)\s*Day', text, re.I)
-        hours = re.search(r'(\d+)\s*(?:Hour|h|Minute|M)', text, re.I) # 增加对M的兼容
+        hours = re.search(r'(\d+)\s*(?:Hour|h|Minute|M)', text, re.I)
         if days: total_hours += int(days.group(1)) * 24
         if hours: total_hours += int(hours.group(1))
         return total_hours
@@ -85,6 +85,25 @@ def handle_ad_windows(sb_obj):
             return True
     except: pass
     return False
+
+def clean_overlays(sb_obj):
+    """
+    暴力删除拦截点击的透明层 (解决 element click intercepted 报错)
+    """
+    try:
+        js_cleanup = """
+        var divs = document.querySelectorAll('div');
+        for (var i = 0; i < divs.length; i++) {
+            var style = window.getComputedStyle(divs[i]);
+            var zIndex = parseInt(style.zIndex);
+            if (zIndex > 1000 || style.position === 'fixed') {
+                divs[i].remove();
+            }
+        }
+        """
+        sb_obj.execute_script(js_cleanup)
+        logger.info("🧹 [清场] 已清理隐形拦截层")
+    except: pass
 
 # ==========================================
 # 4. Pella 自动化流程
@@ -110,7 +129,7 @@ def run_test():
     return "未找到时间文本";
     """
 
-    # 启动环境：强制禁图禁音，压低内存
+    # 极简启动环境：禁图禁音
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None,
             chromium_arg="--blink-settings=imagesEnabled=false,--mute-audio") as sb:
         try:
@@ -137,7 +156,7 @@ def run_test():
             hours_before = parse_time_to_hours(text_before)
             logger.info(f"🕒 [续期前] 原始: {text_before} | 小时: {hours_before}")
 
-            # --- 阶段 3: 暴力续期 (普通点击 + 窗口强杀) ---
+            # --- 阶段 3: 执行续期 (点-清-关 闭环) ---
             logger.info(f"🚀 [跳转] 进入续期网站: {renew_url}")
             sb.uc_open_with_reconnect(renew_url, 10)
             sb.sleep(5)
@@ -146,10 +165,15 @@ def run_test():
             # [A] 第一个 Continue
             for i in range(10):
                 if sb.is_element_visible('button#submit-button[data-ref="first"]'):
-                    sb.click('button#submit-button[data-ref="first"]') # 维持普通点击
-                    sb.sleep(3)
-                    if handle_ad_windows(sb): continue
-                    if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
+                    clean_overlays(sb) # 点击前先清场
+                    try:
+                        sb.click('button#submit-button[data-ref="first"]') # 普通点击
+                        sb.sleep(3)
+                        if handle_ad_windows(sb): continue
+                        if not sb.is_element_visible('button#submit-button[data-ref="first"]'): break
+                    except:
+                        handle_ad_windows(sb)
+                        continue
 
             # [B] 处理 CF
             sb.sleep(5)
@@ -167,13 +191,18 @@ def run_test():
             captcha_btn = 'button#submit-button[data-ref="captcha"]'
             for i in range(10):
                 if sb.is_element_visible(captcha_btn):
-                    sb.click(captcha_btn) # 维持普通点击
-                    sb.sleep(3)
-                    if handle_ad_windows(sb): continue
-                    if not sb.is_element_visible(captcha_btn): break
+                    clean_overlays(sb) # 点击前先清场
+                    try:
+                        sb.click(captcha_btn) # 普通点击
+                        sb.sleep(3)
+                        if handle_ad_windows(sb): continue
+                        if not sb.is_element_visible(captcha_btn): break
+                    except:
+                        handle_ad_windows(sb)
+                        continue
 
-            # [D] 18秒静默计时 (每秒清理一次广告)
-            logger.info("⌛ [内存守护] 18秒倒计时并清理潜在广告...")
+            # [D] 18秒倒计时巡逻
+            logger.info("⌛ [内存守护] 18秒倒计时，正在清理潜在广告...")
             for _ in range(18):
                 sb.sleep(1)
                 handle_ad_windows(sb)
@@ -182,14 +211,19 @@ def run_test():
             click_final = False
             for i in range(10):
                 if sb.is_element_visible(final_btn):
-                    sb.click(final_btn) # 维持普通点击
-                    sb.sleep(3)
-                    if handle_ad_windows(sb): continue
-                    if not sb.is_element_visible(final_btn):
-                        click_final = True
-                        break
+                    clean_overlays(sb) # 点击前先清场
+                    try:
+                        sb.click(final_btn) # 普通点击
+                        sb.sleep(3)
+                        if handle_ad_windows(sb): continue
+                        if not sb.is_element_visible(final_btn):
+                            click_final = True
+                            break
+                    except:
+                        handle_ad_windows(sb)
+                        continue
             
-            # --- 阶段 4: 结果对比 ---
+            # --- 阶段 4: 结果数值对比 ---
             logger.info("🏁 [校验] 回访 Pella 验证增量...")
             sb.uc_open_with_reconnect(target_server_url, 10)
             sb.sleep(10)
@@ -199,7 +233,7 @@ def run_test():
 
             if hours_after > hours_before:
                 print("PELLA_SUCCESS_FLAG") 
-                send_tg_notification("续期成功 ✅", f"时间增加！\n前: {text_before}\n后: {text_after}", None)
+                send_tg_notification("续期成功 ✅", f"时间增加！\n续期前: {text_before}\n续期后: {text_after}", None)
             else:
                 send_tg_notification("保活跳过 🕒", f"检测到时间未增加，维持原计划。当前: {text_after}", None)
 
