@@ -19,6 +19,7 @@ def send_tg_notification(status, message, photo_path=None):
     tz_bj = timezone(timedelta(hours=8))
     bj_time = datetime.now(tz_bj).strftime('%Y-%m-%d %H:%M:%S')
     emoji = "✅" if "成功" in status else "❌"
+    # 注意：此处维持 PELLA_EMAIL 环境变量读取逻辑
     formatted_msg = f"{emoji} **Pella 自动化续期报告**\n━━━━━━━━━━━━━━━━━━\n👤 **账户**: `{os.environ.get('PELLA_EMAIL')}`\n📡 **状态**: {status}\n📝 : {message}\n🕒 **北京时间**: `{bj_time}`\n━━━━━━━━━━━━━━━━━━"
     try:
         if photo_path and os.path.exists(photo_path):
@@ -60,7 +61,7 @@ def get_pella_code(mail_address, app_password):
     except Exception as e: return None
 
 # ==========================================
-# 3. 辅助功能：数值换算、弹窗强杀、盾牌拆除
+# 3. 辅助功能：数值换算、弹窗强杀、盾牌拆除 (锁死不改)
 # ==========================================
 def parse_time_to_hours(text):
     if not text or "未找到" in text: return 0
@@ -175,7 +176,7 @@ def run_test():
                         handle_ad_windows(sb)
                         continue
 
-            # [B] 处理 CF
+            # [B] 处理 CF (维持原样)
             sb.sleep(5)
             handle_ad_windows(sb)
             try:
@@ -201,7 +202,7 @@ def run_test():
                         handle_ad_windows(sb)
                         continue
 
-            # [D] 18秒倒计时巡逻
+            # [D] 18秒倒计时巡逻 (维持原样)
             logger.info("⌛ [内存守护] 18秒倒计时，正在清理潜在广告...")
             for _ in range(18):
                 sb.sleep(1)
