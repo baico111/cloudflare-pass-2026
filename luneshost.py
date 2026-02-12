@@ -7,7 +7,7 @@ from seleniumbase import SB
 from loguru import logger
 
 # ==========================================
-# 1. 核心 API 导入 (完全不改)
+# 1. 核心 API 导入 (完全保持原样)
 # ==========================================
 try:
     from bypass import bypass_cloudflare as api_core_1
@@ -19,7 +19,7 @@ except Exception as e:
     logger.error(f"🚨 API 加载失败: {e}")
 
 # ==========================================
-# 2. TG 通知功能 (完全不改)
+# 2. TG 通知功能 (完全保持原样)
 # ==========================================
 def send_tg_notification(status, message, photo_path=None):
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -53,6 +53,7 @@ def send_tg_notification(status, message, photo_path=None):
 # ==========================================
 # 3. 自动化续期主流程 (一步到位版)
 # ==========================================
+# 适配 HF：显式锁定输出路径
 OUTPUT_DIR = Path("/app/output")
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -64,13 +65,13 @@ def run_auto_renew():
     refresh_count = int(os.environ.get("REFRESH_COUNT", 3))
     refresh_interval = int(os.environ.get("REFRESH_INTERVAL", 5))
 
-    # --- 核心修改：从环境变量获取 ID 并动态合成 URL ---
+    # --- 从环境变量获取 ID 并动态合成 URL ---
     server_id = os.environ.get("SERVER_ID", "52794")
-    # --- 核心修改：读取代理变量 ---
+    # --- 读取代理变量 ---
     proxy = os.environ.get("PROXY")
     target_server_url = f"https://betadash.lunes.host/servers/{server_id}"
 
-    # 核心修改：在 SB 启动时挂载代理隧道
+    # 在 SB 启动时挂载代理隧道
     with SB(uc=True, xvfb=True, proxy=proxy if proxy else None) as sb:
         try:
             # 第一步：直接访问详情页，系统会自动带你去登录页
@@ -95,7 +96,7 @@ def run_auto_renew():
             try: sb.uc_gui_click_captcha()
             except: logger.warning("⚠️ 验证码点击跳过或未检测到")
             
-            # 第四步：点击登录，登录成功后系统会自动返回到详情页
+            # 第四步：点击登录
             logger.info("🖱️ 点击提交登录，等待系统自动回跳详情页...")
             sb.click('button.submit-btn')
             
