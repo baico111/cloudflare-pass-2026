@@ -45,9 +45,9 @@ RUN wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-
 
 WORKDIR /app
 
-# 4. 创建输出目录 (用于持久化配置和授权文件)
-# 确保 pella_renew.py 生成的截图也有地方存放
-RUN mkdir -p /app/output && chmod 777 /app/output
+# 4. 创建输出目录 (用于持久化配置、授权文件、策略文件及历史日志)
+# ✨ 注入：确保历史日志目录在容器构建时即存在
+RUN mkdir -p /app/output/history_logs && chmod -R 777 /app/output
 
 COPY . .
 
@@ -59,7 +59,7 @@ RUN pip install --no-cache-dir pyvirtualdisplay seleniumbase loguru streamlit re
 # 6. 预初始化 SeleniumBase (必须，用于过 CF)
 RUN sbase install chromedriver
 
-# 7. 启动命令 (适配 Hugging Face 端口 7860，其余逻辑不动)
-# 针对 Zeabur 增加了 MALLOC_ARENA_MAX 以强制限制 Python 和 Chrome 的内存碎片
-# HF 默认端口为 7860
-CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && export MALLOC_ARENA_MAX=2 && export QT_X11_NO_MITSHM=1 && export _CHROME_STRATEGY=nosandbox && streamlit run app.py --server.port 7860 --server.address 0.0.0.0 & while true; do echo '--- 启动调度任务 ---'; python scheduler.py; sleep 1800; done"]
+# 7. 启动命令 (适配两个代码的联动执行)
+# ✨ 物理接电：启动时先清理 X 锁，随后并行启动面板与调度轮询
+# 将 sleep 时间改为 1800s (30分钟)，以匹配 scheduler.py 中的 15分钟推送窗口，确保不会错过 09:00 推送
+CMD ["sh", "-c", "rm -f /tmp/.X11-unix/X* && export MALLOC_ARENA_MAX=2 && export QT_X11_NO_MITSHM=1 && export _CHROME_STRATEGY=nosandbox && streamlit run app.py --server.port 7860 --server.address 0.0.0.0 & while true; do echo '--- [矩阵调度] 轮询开始 ---'; python scheduler.py; sleep 1800; done"]
