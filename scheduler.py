@@ -1,12 +1,17 @@
 import json
 import os
 import subprocess
+import requests
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from huggingface_hub import hf_hub_download, upload_file
 
 # 配置文件根目录 (保持原样)
 OUTPUT_DIR = "/app/output"
+
+# ✨ 注入：历史日志目录 (与 app.py 对齐)
+HISTORY_DIR = os.path.join(OUTPUT_DIR, "history_logs")
+if not os.path.exists(HISTORY_DIR): os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # --- HF 数据集同步逻辑 (保持原样) ---
 HF_DATASET_ID = os.environ.get("HF_DATASET_ID") 
@@ -21,10 +26,13 @@ def sync_from_cloud():
     if HF_TOKEN and HF_DATASET_ID:
         try:
             os.makedirs(OUTPUT_DIR, exist_ok=True)
-            for f in ["tasks_config.json", "auth_config.json"]:
-                hf_hub_download(repo_id=HF_DATASET_ID, filename=f, 
-                                local_dir=OUTPUT_DIR, repo_type="dataset", token=HF_TOKEN)
-            print("[+] 云端时间表同步完成")
+            # ✨ 注入：拉取列表新增 auto_strategy.json
+            for f in ["tasks_config.json", "auth_config.json", "auto_strategy.json"]:
+                try:
+                    hf_hub_download(repo_id=HF_DATASET_ID, filename=f, 
+                                    local_dir=OUTPUT_DIR, repo_type="dataset", token=HF_TOKEN)
+                except: pass # 容错：如果云端还没这个文件则跳过
+            print("[+] 云端时间表及策略同步完成")
         except Exception as e: print(f"[!] 云端拉取失败: {e}")
 
 def sync_to_cloud(local_full_path, repo_path):
@@ -34,9 +42,63 @@ def sync_to_cloud(local_full_path, repo_path):
                         repo_id=HF_DATASET_ID, repo_type="dataset", token=HF_TOKEN)
         except: pass
 
+# ✨ 注入：自动化简报推送函数 (对齐 Web 面板策略)
+def auto_send_daily_report():
+    """读取 Web 面板配置的策略并决定是否推送简报"""
+    strategy_path = os.path.join(OUTPUT_DIR, "auto_strategy.json")
+    if not os.path.exists(strategy_path):
+        report_hour = 9 # 默认 9 点
+        report_enabled = True
+    else:
+        try:
+            with open(strategy_path, 'r') as f:
+                strat = json.load(f)
+                report_hour = strat.get('report_hour', 9)
+                report_enabled = strat.get('report_enabled', True)
+        except:
+            report_hour, report_enabled = 9, True
+
+    if not report_enabled: return
+
+    bj_tz = timezone(timedelta(hours=8))
+    now = datetime.now(bj_tz)
+    
+    # 检测当前小时是否匹配网页设置的时间 (15分钟容错窗口)
+    if now.hour == report_hour and now.minute <= 15:
+        token = os.environ.get("TELEGRAM_BOT_TOKEN")
+        chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+        if not token or not chat_id: return
+
+        # 聚合当前所有任务状态
+        all_tasks_path = os.path.join(OUTPUT_DIR, "tasks_config.json")
+        if not os.path.exists(all_tasks_path): return
+        with open(all_tasks_path, 'r', encoding='utf-8') as f:
+            tasks = json.load(f)
+            
+        active_tasks = [t for t in tasks if t.get('active')]
+        report_text = f"📊 *矩阵内核策略简报 ({now.strftime('%H:%M')})*\n"
+        report_text += f"━━━━━━━━━━━━━━━\n"
+        report_text += f"✅ 活跃轨道: {len(active_tasks)}\n"
+        report_text += f"🤖 自动模式: 已激活\n\n"
+        report_text += "📅 队列预告:\n"
+        
+        sorted_tasks = sorted(active_tasks, key=lambda x: x.get('next_run', '9999'))[:3]
+        for t in sorted_tasks:
+            report_text += f"🔹 {t['name']}: {t.get('next_run', 'N/A')}\n"
+
+        try:
+            requests.post(f"{CF_TG_BASE_URL.rstrip('/')}/{token}/sendMessage", 
+                         json={"chat_id": chat_id, "text": report_text, "parse_mode": "Markdown"},
+                         headers={"X-Custom-Auth": CF_SECRET_KEY}, timeout=10)
+            print("[+] 策略简报推送成功")
+        except: pass
+
 def run_scheduler():
     # ✨ 核心接电：先同步
     sync_from_cloud()
+
+    # ✨ 注入：执行策略检查
+    auto_send_daily_report()
 
     status_files = list(Path(OUTPUT_DIR).rglob("*.status.json"))
     
@@ -107,10 +169,25 @@ def run_scheduler():
                 env["REFRESH_INTERVAL"] = str(task.get('refresh_interval', 5))
             
             try:
-                subprocess.run([
+                # ✨ 注入：捕获标准输出以存证历史记录
+                process = subprocess.Popen([
                     "xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", 
                     "python", script_name
-                ], env=env, check=True)
+                ], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+                
+                full_log = []
+                for line in process.stdout:
+                    print(line.strip()) # 保持终端实时输出
+                    full_log.append(line.strip())
+                process.wait()
+
+                # ✨ 注入：历史存证写入 (确保后台运行也有历史记录看)
+                log_file = os.path.join(HISTORY_DIR, f"{task['name']}.log")
+                with open(log_file, 'a', encoding='utf-8') as f:
+                    f.write(f"\n[{datetime.now(bj_tz).strftime('%Y-%m-%d %H:%M:%S')}] BACKGROUND_RUN_STATUS: {process.returncode}\n")
+                    f.write("\n".join(full_log[-15:]) + "\n" + "="*30)
+
+                if process.returncode != 0: raise Exception(f"进程异常退出 Code: {process.returncode}")
                 
                 proj_name, email = script_name.replace('.py', ''), task['email']
                 if os.path.exists("final_result.png"):
