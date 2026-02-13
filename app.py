@@ -6,6 +6,7 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 from huggingface_hub import hf_hub_download, upload_file, delete_file
+from collections import deque
 
 # 配置文件路径锁定
 OUTPUT_DIR = "/app/output"
@@ -14,6 +15,10 @@ if not os.path.exists(OUTPUT_DIR):
 
 CONFIG_FILE = os.path.join(OUTPUT_DIR, "tasks_config.json")
 AUTH_FILE = os.path.join(OUTPUT_DIR, "auth_config.json")
+# ✨ 注入：自动化策略配置文件
+AUTO_STRATEGY_FILE = os.path.join(OUTPUT_DIR, "auto_strategy.json")
+HISTORY_DIR = os.path.join(OUTPUT_DIR, "history_logs")
+if not os.path.exists(HISTORY_DIR): os.makedirs(HISTORY_DIR, exist_ok=True)
 
 # ✨ 锁死从系统环境变量获取的 CF 配置
 CF_TG_BASE_URL = os.environ.get("TG_PROXY_URL", "https://tgtgcf.yilovesky521.workers.dev")
@@ -22,13 +27,58 @@ CF_SECRET_KEY = os.environ.get("TG_AUTH_KEY", "Sky315989021")
 HF_DATASET_ID = os.environ.get("HF_DATASET_ID") 
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
+if 'cloud_sync_status' not in st.session_state:
+    st.session_state.cloud_sync_status = "未就绪"
+
+# ✨ 注入：策略加载函数
+def load_strategy():
+    if os.path.exists(AUTO_STRATEGY_FILE):
+        try:
+            with open(AUTO_STRATEGY_FILE, 'r') as f:
+                return json.load(f)
+        except: pass
+    return {"report_hour": 9, "report_enabled": True}
+
+# ✨ 注入：策略保存函数
+def save_strategy(strategy):
+    with open(AUTO_STRATEGY_FILE, 'w') as f:
+        json.dump(strategy, f)
+    sync_to_cloud("auto_strategy.json")
+
+def send_daily_report(tasks):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not token or not chat_id: return
+    
+    active_tasks = [t for t in tasks if t.get('active')]
+    success_count = len([t for t in active_tasks if "从未运行" not in t.get('last_run', '')])
+    
+    report_text = f"📊 *矩阵内核手动简报*\n"
+    report_text += f"━━━━━━━━━━━━━━━\n"
+    report_text += f"✅ 运行中任务: {len(active_tasks)}\n"
+    report_text += f"📈 已激活节点: {success_count}\n"
+    report_text += f"📅 报告时间: {datetime.now(timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    report_text += "近期预定:\n"
+    
+    sorted_tasks = sorted(active_tasks, key=lambda x: x.get('next_run', '9999'))[:3]
+    for t in sorted_tasks:
+        report_text += f"🔹 {t['name']}: {t.get('next_run', 'N/A')}\n"
+        
+    try:
+        requests.post(f"{CF_TG_BASE_URL.rstrip('/')}/{token}/sendMessage", 
+                     json={"chat_id": chat_id, "text": report_text, "parse_mode": "Markdown"},
+                     headers={"X-Custom-Auth": CF_SECRET_KEY}, timeout=10)
+    except: pass
+
 def sync_from_cloud():
     if HF_TOKEN and HF_DATASET_ID:
-        for f_name in ["tasks_config.json", "auth_config.json", "error.png", "final_result.png"]:
+        for f_name in ["tasks_config.json", "auth_config.json", "auto_strategy.json", "error.png", "final_result.png"]:
             try:
                 hf_hub_download(repo_id=HF_DATASET_ID, filename=f_name, 
                                 local_dir=OUTPUT_DIR, repo_type="dataset", token=HF_TOKEN)
-            except: pass
+                st.session_state.cloud_sync_status = "同步成功"
+            except: 
+                st.session_state.cloud_sync_status = "同步异常"
 
 def sync_to_cloud(filename):
     if HF_TOKEN and HF_DATASET_ID:
@@ -37,19 +87,17 @@ def sync_to_cloud(filename):
             try:
                 upload_file(path_or_fileobj=full_path, path_in_repo=filename,
                             repo_id=HF_DATASET_ID, repo_type="dataset", token=HF_TOKEN)
-            except: pass
+                st.session_state.cloud_sync_status = "已上传"
+            except: 
+                st.session_state.cloud_sync_status = "上传失败"
 
 def delete_from_cloud(repo_path):
-    """✨ 注入：物理删除云端数据集中的残余文件"""
     if HF_TOKEN and HF_DATASET_ID:
         try:
             delete_file(path_in_repo=repo_path, repo_id=HF_DATASET_ID, 
                         repo_type="dataset", token=HF_TOKEN)
         except: pass
 
-# ==========================================
-# 核心修复：隔离同步函数，防止 Context 报错卡死启动
-# ==========================================
 if 'initialized' not in st.session_state:
     sync_from_cloud()
     st.session_state.initialized = True
@@ -77,7 +125,6 @@ def load_config():
     return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": "", "renew_id": ""}]
 
 def save_config(tasks):
-    # ✨ 注入：物理计算并存储 next_run 字段
     bj_tz = timezone(timedelta(hours=8))
     for task in tasks:
         last = task.get('last_run', "从未运行")
@@ -88,7 +135,6 @@ def save_config(tasks):
             except: task['next_run'] = "计算异常"
         else: task['next_run'] = "等待首次运行"
 
-        # 账号物理隔离存储逻辑 (全量还原)
         proj_name = task.get('script').replace('.py', '')
         email = task.get('email', 'default')
         proj_dir = os.path.join(OUTPUT_DIR, proj_name)
@@ -119,6 +165,7 @@ st.markdown("""
     .stTextInput>div>div>input { background-color: #000 !important; color: #00ff80 !important; font-size: 0.8rem !important; }
     .highlight-time { color: #00e5ff !important; font-weight: 900 !important; background: rgba(0, 229, 255, 0.1); padding: 2px 5px; border-radius: 3px; }
     code { font-size: 0.7rem !important; line-height: 1.2 !important; }
+    .queue-card { background: rgba(255,255,255,0.03); border-left: 3px solid #00e5ff; padding: 8px; margin: 4px 0; border-radius: 0 4px 4px 0; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -144,18 +191,79 @@ st.title("🛡️ 矩阵自动化控制内核")
 if 'tasks' not in st.session_state:
     st.session_state.tasks = load_config()
 
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+
 with st.sidebar:
     st.header("⚙️ 终端管理")
+    
+    c_sync = st.session_state.cloud_sync_status
+    c_color = "#00ff80" if "成功" in c_sync or "上传" in c_sync else "#ff4b4b"
+    st.markdown(f"☁️ 云端同步: <span style='color:{c_color}; font-weight:bold;'>{c_sync}</span>", unsafe_allow_html=True)
+    
+    # ✨ 注入：自动化策略中心
+    with st.expander("🤖 自动化策略中心", expanded=False):
+        strategy = load_strategy()
+        st.markdown("---")
+        strategy['report_enabled'] = st.toggle("开启每日自动简报", value=strategy.get('report_enabled', True))
+        strategy['report_hour'] = st.number_input("推送时间 (北京24h)", 0, 23, value=strategy.get('report_hour', 9))
+        if st.button("💾 应用自动化策略"):
+            save_strategy(strategy)
+            st.success("策略已同步至云端")
+
+    if st.button("📢 发送即时简报"):
+        send_daily_report(st.session_state.tasks)
+        st.toast("简报已推送到 Telegram")
+
+    if st.session_state.is_running:
+        st.warning("⚡ 引擎进程占用中...")
+    else:
+        st.success("💎 调度引擎就绪")
+        
     new_item = st.text_input("项目识别码", placeholder="识别码...")
     script_options = ["katabump_renew.py", "luneshost.py", "pella_renew.py"]
     selected_script = st.selectbox("核心脚本", script_options)
     if st.button("➕ 注入新进程"):
-        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "server_id": "177688", "proxy": "", "renew_id": ""}
+        new_task = {"name": new_item, "script": selected_script, "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": "", "renew_id": ""}
         if selected_script == "luneshost.py": new_task.update({"stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794"})
         if selected_script == "pella_renew.py": new_task.update({"server_id": "2b3bbeef0eeb452299a11e431c3c2d5b", "renew_id": "m4w0wJrEmgEC"})
         st.session_state.tasks.append(new_task)
         save_config(st.session_state.tasks)
         st.rerun()
+
+    # ✨ 注入：SOCKS5 链路测速仪 (位置迁移后的预执行队列上方)
+    st.divider()
+    with st.expander("🔌 SOCKS5 链路测速仪", expanded=False):
+        test_proxy = st.text_input("代理地址", placeholder="user:pass@host:port", key="proxy_tester_input")
+        if st.button("🚀 拨号测试"):
+            if test_proxy:
+                # 协议自动清洗补全
+                final_proxy = test_proxy if test_proxy.startswith(("http", "socks")) else f"socks5://{test_proxy}"
+                try:
+                    st.info("📡 正在尝试建立中继链路...")
+                    proxies = {"http": final_proxy, "https": final_proxy}
+                    start_t = time.time()
+                    resp = requests.get("https://www.google.com", proxies=proxies, timeout=15)
+                    latency = round((time.time() - start_t) * 1000)
+                    if resp.status_code == 200:
+                        st.success(f"✅ 链路通畅! 延迟: {latency}ms")
+                    else:
+                        st.warning(f"⚠️ 握手成功但返回异常: {resp.status_code}")
+                except Exception as e:
+                    st.error(f"❌ 链路中断: 无法连接至代理或超时")
+            else:
+                st.warning("请输入地址后再测试")
+
+    st.markdown("### 📅 预执行队列流")
+    sorted_tasks = sorted([t for t in st.session_state.tasks if t.get('active')], 
+                         key=lambda x: x.get('next_run', '9999'))[:4]
+    for stask in sorted_tasks:
+        st.markdown(f"""<div class='queue-card'><b>{stask['name']}</b><br><small>Next: {stask.get('next_run')}</small></div>""", unsafe_allow_html=True)
+    
+    st.markdown("### 📊 资源负载")
+    usage_color = "#00ff80" if not st.session_state.is_running else "#ff4b4b"
+    st.markdown(f"<h3 style='color:{usage_color}; text-align:center;'>{'IDLE' if not st.session_state.is_running else 'BUSY'}</h3>", unsafe_allow_html=True)
+    st.progress(100 if st.session_state.is_running else 0)
     
     st.divider()
     with st.expander("🔐 安全设置"):
@@ -173,7 +281,6 @@ with st.sidebar:
 
     st.header("📡 链路诊断")
     if st.button("🚀 测试 TG 通知"):
-        # ✨ 物理回滚：使用最初能跑通的简单 Selenium 截图逻辑
         try:
             from seleniumbase import SB 
             token = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -190,17 +297,16 @@ with st.sidebar:
             
             with open(test_shot, 'rb') as f:
                 r = requests.post(target_url, 
-                                 data={"chat_id": chat_id, "caption": "🔔 链路回滚测试：Baidu 截图同步成功"}, 
-                                 files={'photo': f}, 
-                                 headers=headers, 
-                                 timeout=30)
+                                  data={"chat_id": chat_id, "caption": "🔔 链路回滚测试：Baidu 截图同步成功"}, 
+                                  files={'photo': f}, 
+                                  headers=headers, 
+                                  timeout=30)
             
             if r.status_code == 200: 
                 st.success("✅ 通信 & 截图发送成功")
                 sync_to_cloud("baidu_test.png")
             else: 
                 st.error(f"❌ 报错: {r.status_code}")
-                # 保底文本链路测试
                 requests.post(f"{CF_TG_BASE_URL.rstrip('/')}/{token}/sendMessage", 
                              json={"chat_id": chat_id, "text": f"⚠️ 截图失败({r.status_code})，文字链路存活"}, 
                              headers=headers)
@@ -222,10 +328,10 @@ for i, task in enumerate(updated_tasks):
         task['active'] = head_2.checkbox("激活该轨道进程", value=task.get('active', True), key=f"active_{i}")
 
         if task.get('script') == "pella_renew.py":
-            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 1.8, 0.8, 1.2, 1.8])
-            c1.text_input("算法模式", value="内置模式", disabled=True, key=f"algo_dis_{i}")
+            c1, c2, c3, c4, c5, c6 = st.columns([1.2, 1.8, 2.5, 0.8, 1.2, 1.8])
+            c1.text_input("算法模式", value="基站穿透", disabled=True, key=f"algo_dis_{i}")
             task['email'] = c2.text_input("Email", value=task.get('email', ''), key=f"email_{i}")
-            task['password'] = c3.text_input("Password", type="password", value=task.get('password', ''), key=f"pw_{i}")
+            task['password'] = c3.text_input("Kuma Status URL", value=task.get('password', ''), key=f"pw_{i}", help="填写你的 Kuma 状态页地址")
             task['server_id'] = c4.text_input("ID", value=task.get('server_id', ''), key=f"sid_{i}")
             task['renew_id'] = c5.text_input("续期ID", value=task.get('renew_id', 'm4w0wJrEmgEC'), key=f"rid_{i}")
             task['proxy'] = c6.text_input("SOCKS5 代理", value=task.get('proxy', ''), key=f"proxy_{i}")
@@ -251,10 +357,16 @@ for i, task in enumerate(updated_tasks):
         st.markdown("<div style='margin: 5px 0; border-top: 1px solid rgba(255,255,255,0.05);'></div>", unsafe_allow_html=True)
         t_time1, t_time2 = st.columns(2)
         last = task.get('last_run', "从未运行")
-        # ✨ 这里改为读取物理注入的 next_run 字段进行展示
         next_date = task.get('next_run', "等待运行")
         t_time1.markdown(f"上次运行: <span class='highlight-time'>{last}</span>", unsafe_allow_html=True)
         t_time2.markdown(f"下次预定: <span class='highlight-time'>{next_date}</span>", unsafe_allow_html=True)
+
+        with st.expander("📝 查看历史链路记录"):
+            log_path = os.path.join(HISTORY_DIR, f"{task['name']}.log")
+            if os.path.exists(log_path):
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    st.text_area("历史存证", f.read(), height=100, key=f"hist_log_{i}")
+            else: st.caption("暂无历史存证数据")
 
         st.markdown("<div style='margin: 8px 0;'></div>", unsafe_allow_html=True)
         btn_1, btn_2, btn_3, _ = st.columns([1, 1, 1, 1.5])
@@ -262,20 +374,17 @@ for i, task in enumerate(updated_tasks):
             save_config(updated_tasks)
             st.toast(f"{task['name']} 已保存")
             
-        if btn_2.button("🚀 同步", key=f"run_{i}"):
+        run_btn_label = "🚀 同步" if not st.session_state.is_running else "⏳ 排队中"
+        if btn_2.button(run_btn_label, key=f"run_{i}", disabled=st.session_state.is_running):
+            st.session_state.is_running = True
             log_area = st.empty()
-            with st.status(f"同步中...", expanded=True) as status:
+            with st.status(f"正在建立虚拟总线连接...", expanded=True) as status:
                 env = os.environ.copy()
-                # ✨ 核心物理对齐：注入所有 CF 代理及 TG 链路参数
                 env.update({
-                    "EMAIL": str(task['email']), 
-                    "PASSWORD": str(task['password']), 
-                    "BYPASS_MODE": str(task['mode']), 
-                    "PYTHONUNBUFFERED": "1",
-                    "TG_PROXY_URL": str(CF_TG_BASE_URL), 
-                    "TG_AUTH_KEY": str(CF_SECRET_KEY),
-                    "SERVER_ID": str(task.get('server_id', '')), 
-                    "PROXY": str(task.get('proxy', '')), 
+                    "EMAIL": str(task['email']), "PASSWORD": str(task['password']), 
+                    "BYPASS_MODE": str(task['mode']), "PYTHONUNBUFFERED": "1",
+                    "TG_PROXY_URL": str(CF_TG_BASE_URL), "TG_AUTH_KEY": str(CF_SECRET_KEY),
+                    "SERVER_ID": str(task.get('server_id', '')), "PROXY": str(task.get('proxy', '')), 
                     "RENEW_ID": str(task.get('renew_id', '')),
                     "TELEGRAM_BOT_TOKEN": str(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
                     "TELEGRAM_CHAT_ID": str(os.environ.get("TELEGRAM_CHAT_ID", ""))
@@ -286,35 +395,43 @@ for i, task in enumerate(updated_tasks):
                     env.update({"STAY_TIME": str(task.get('stay_time', 10)), "REFRESH_COUNT": str(task.get('refresh_count', 3)), "REFRESH_INTERVAL": str(task.get('refresh_interval', 5))})
                 
                 process = subprocess.Popen(["xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", "python", task.get('script')], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
-                full_log = ""
+                
+                log_queue = deque(maxlen=25) 
+                full_session_log = []
                 for line in process.stdout:
-                    full_log += line
-                    log_area.code("\n".join(full_log.splitlines()[-20:]))
+                    log_queue.append(line.strip())
+                    full_session_log.append(line.strip())
+                    log_area.code("\n".join(log_queue))
                 process.wait()
+
+                with open(os.path.join(HISTORY_DIR, f"{task['name']}.log"), 'a', encoding='utf-8') as f:
+                    f.write(f"\n[{datetime.now(bj_tz).strftime('%Y-%m-%d %H:%M:%S')}] RUN: {process.returncode}\n")
+                    f.write("\n".join(full_session_log[-10:]) + "\n" + "-"*30)
 
                 time.sleep(7) 
                 sync_to_cloud("error.png")
                 sync_to_cloud("final_result.png")
                 
                 should_update_ui = True
-                if task.get('script') == "pella_renew.py" and "PELLA_SUCCESS_FLAG" not in full_log:
+                if task.get('script') == "pella_renew.py" and "PELLA_SUCCESS_FLAG" not in "\n".join(log_queue):
                     should_update_ui = False
                 
                 if process.returncode == 0 and should_update_ui:
                     task['last_run'] = datetime.now(bj_tz).strftime("%Y-%m-%d %H:%M:%S")
                     save_config(updated_tasks)
-                    status.update(label="成功", state="complete")
+                    status.update(label="进程同步成功", state="complete")
+                    st.session_state.is_running = False
                     st.rerun()
                 else:
-                    status.update(label="任务异常", state="error")
+                    status.update(label="链路任务异常", state="error")
                     st.error("❗ 运行失败。")
+                    st.session_state.is_running = False
 
         if btn_3.button("🗑️ 移除", key=f"del_{i}"):
             target_task = st.session_state.tasks[i]
             proj_name = target_task.get('script').replace('.py', '')
             email_tag = target_task.get('email', 'default')
             cloud_path = f"{proj_name}/{email_tag}.status.json"
-            
             st.session_state.tasks.pop(i)
             save_config(st.session_state.tasks)
             delete_from_cloud(cloud_path)
