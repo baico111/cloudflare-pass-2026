@@ -128,6 +128,7 @@ def run_scheduler():
             should_run = True
         else:
             try:
+                # ✨ 物理注入：判定时间时强制赋予北京时区，防止 offset-naive 和 offset-aware 冲突报错
                 last_run_time = datetime.strptime(str(last_run_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=bj_tz)
                 if now >= (last_run_time + timedelta(days=freq)):
                     should_run = True
@@ -135,7 +136,7 @@ def run_scheduler():
                 should_run = True
 
         if should_run:
-            # ✨ 物理注入：检测空值拦截逻辑
+            # ✨ 物理注入：空账号/密码拦截逻辑，防止运行无效任务
             if not task.get('email') or not task.get('password'):
                 print(f"[!] 跳过任务 {task.get('name')}: 账号或密码为空")
                 continue
@@ -183,10 +184,20 @@ def run_scheduler():
                     full_log.append(line.strip())
                 process.wait()
 
+                # ✨ 物理注入：日志截断存证。读取旧日志并结合新日志，物理保留最后 50 行，防止文件无限膨胀
                 log_file = os.path.join(HISTORY_DIR, f"{task['name']}.log")
-                with open(log_file, 'a', encoding='utf-8') as f:
-                    f.write(f"\n[{datetime.now(bj_tz).strftime('%Y-%m-%d %H:%M:%S')}] BACKGROUND_RUN_STATUS: {process.returncode}\n")
-                    f.write("\n".join(full_log[-15:]) + "\n" + "="*30)
+                existing_lines = []
+                if os.path.exists(log_file):
+                    with open(log_file, 'r', encoding='utf-8') as f_read:
+                        existing_lines = f_read.readlines()
+                
+                new_entry = [f"\n[{datetime.now(bj_tz).strftime('%Y-%m-%d %H:%M:%S')}] BACKGROUND_RUN: {process.returncode}\n"]
+                new_entry.extend([line + "\n" for line in full_log[-15:]])
+                new_entry.append("="*30 + "\n")
+                
+                combined_logs = (existing_lines + new_entry)[-50:] # ✨ 强制锁死最后 50 行
+                with open(log_file, 'w', encoding='utf-8') as f_write:
+                    f_write.writelines(combined_logs)
 
                 if process.returncode != 0: raise Exception(f"进程异常退出 Code: {process.returncode}")
                 
@@ -211,7 +222,6 @@ def run_scheduler():
                     with open(all_config_path, 'r', encoding='utf-8') as f_all:
                         all_tasks = json.load(f_all)
                     
-                    # 在汇总列表中寻找并匹配该任务（根据 email 和 script 匹配）
                     updated = False
                     for t in all_tasks:
                         if t.get('email') == task.get('email') and t.get('script') == task.get('script'):
@@ -225,7 +235,7 @@ def run_scheduler():
                             json.dump(all_tasks, f_save, ensure_ascii=False, indent=2)
                         # ✨ 物理回传：同步汇总文件到云端
                         sync_to_cloud(all_config_path, "tasks_config.json")
-                
+
                 # 同步单独状态文件到云端
                 repo_path = str(config_path.relative_to(OUTPUT_DIR))
                 sync_to_cloud(str(config_path), repo_path)
