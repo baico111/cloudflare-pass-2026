@@ -135,6 +135,11 @@ def run_scheduler():
                 should_run = True
 
         if should_run:
+            # ✨ 物理注入：空账号/密码拦截逻辑，防止运行无效任务
+            if not task.get('email') or not task.get('password'):
+                print(f"[!] 跳过任务 {task.get('name')}: 账号或密码为空")
+                continue
+
             for old in ["final_result.png", "error.png"]:
                 if os.path.exists(old): os.remove(old)
 
