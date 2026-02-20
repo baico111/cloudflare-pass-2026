@@ -135,7 +135,7 @@ def run_scheduler():
                 should_run = True
 
         if should_run:
-            # ✨ 物理注入：空账号/密码拦截逻辑，防止运行无效任务
+            # ✨ 物理注入：检测空值拦截逻辑
             if not task.get('email') or not task.get('password'):
                 print(f"[!] 跳过任务 {task.get('name')}: 账号或密码为空")
                 continue
@@ -148,7 +148,6 @@ def run_scheduler():
             print(f"[*] [后台保活启动] 账号: {task.get('email')} | 脚本: {script_name}")
             
             env = os.environ.copy()
-            # ✨✨✨ 物理接通核心：强制注入 CF 代理全套环境变量 ✨✨✨
             env.update({
                 "EMAIL": str(task['email']), 
                 "PASSWORD": str(task['password']), 
@@ -157,7 +156,6 @@ def run_scheduler():
                 "SERVER_ID": str(task.get('server_id', '177688')),
                 "PROXY": str(task.get('proxy', '')),
                 "RENEW_ID": str(task.get('renew_id', '')),
-                # 🔥 这里是命门：物理对齐 CF 代理环境变量名
                 "TG_PROXY_URL": str(CF_TG_BASE_URL),
                 "TG_AUTH_KEY": str(CF_SECRET_KEY),
                 "TELEGRAM_BOT_TOKEN": str(os.environ.get("TELEGRAM_BOT_TOKEN", "")),
@@ -174,7 +172,6 @@ def run_scheduler():
                 env["REFRESH_INTERVAL"] = str(task.get('refresh_interval', 5))
             
             try:
-                # ✨ 注入：捕获标准输出以存证历史记录
                 process = subprocess.Popen([
                     "xvfb-run", "-a", "--server-args=-screen 0 1920x1080x24", 
                     "python", script_name
@@ -182,11 +179,10 @@ def run_scheduler():
                 
                 full_log = []
                 for line in process.stdout:
-                    print(line.strip()) # 保持终端实时输出
+                    print(line.strip()) 
                     full_log.append(line.strip())
                 process.wait()
 
-                # ✨ 注入：历史存证写入 (确保后台运行也有历史记录看)
                 log_file = os.path.join(HISTORY_DIR, f"{task['name']}.log")
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(f"\n[{datetime.now(bj_tz).strftime('%Y-%m-%d %H:%M:%S')}] BACKGROUND_RUN_STATUS: {process.returncode}\n")
@@ -198,19 +194,42 @@ def run_scheduler():
                 if os.path.exists("final_result.png"):
                     sync_to_cloud("final_result.png", f"{proj_name}/{email}.png")
                 
+                # 1. 更新当前任务的时间
                 task['last_run'] = now.strftime("%Y-%m-%d %H:%M:%S")
-                # ✨ 注入 next_run 物理字段 (同步 app.py 逻辑)
                 try:
                     next_dt = now + timedelta(days=task['freq'])
                     task['next_run'] = next_dt.strftime('%Y-%m-%d %H:%M:%S')
                 except: pass
 
+                # 2. 写入单独的 .status.json 文件
                 with open(config_path, 'w', encoding='utf-8') as f:
                     json.dump(task, f, ensure_ascii=False, indent=2)
                 
+                # 3. ✨ 物理注入：同步更新汇总文件 tasks_config.json
+                all_config_path = os.path.join(OUTPUT_DIR, "tasks_config.json")
+                if os.path.exists(all_config_path):
+                    with open(all_config_path, 'r', encoding='utf-8') as f_all:
+                        all_tasks = json.load(f_all)
+                    
+                    # 在汇总列表中寻找并匹配该任务（根据 email 和 script 匹配）
+                    updated = False
+                    for t in all_tasks:
+                        if t.get('email') == task.get('email') and t.get('script') == task.get('script'):
+                            t['last_run'] = task['last_run']
+                            t['next_run'] = task['next_run']
+                            updated = True
+                            break
+                    
+                    if updated:
+                        with open(all_config_path, 'w', encoding='utf-8') as f_save:
+                            json.dump(all_tasks, f_save, ensure_ascii=False, indent=2)
+                        # ✨ 物理回传：同步汇总文件到云端
+                        sync_to_cloud(all_config_path, "tasks_config.json")
+                
+                # 同步单独状态文件到云端
                 repo_path = str(config_path.relative_to(OUTPUT_DIR))
                 sync_to_cloud(str(config_path), repo_path)
-                print(f"[+] {email} 后台续期成功，云端已对齐。")
+                print(f"[+] {email} 后台续期成功，汇总文件已同步。")
 
             except Exception as e:
                 proj_name, email = script_name.replace('.py', ''), task['email']
