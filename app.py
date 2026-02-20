@@ -443,6 +443,12 @@ for i, task in enumerate(updated_tasks):
             target_task = st.session_state.tasks[i]
             proj_name = target_task.get('script').replace('.py', '')
             email_tag = target_task.get('email', 'default')
+            
+            # ✨ 物理注入：在移除任务时，同步删除本地磁盘上的 status 文件，彻底根除后台重启执行
+            local_status_path = os.path.join(OUTPUT_DIR, proj_name, f"{email_tag}.status.json")
+            if os.path.exists(local_status_path):
+                os.remove(local_status_path)
+                
             cloud_path = f"{proj_name}/{email_tag}.status.json"
             st.session_state.tasks.pop(i)
             save_config(st.session_state.tasks)
