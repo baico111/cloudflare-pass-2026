@@ -124,7 +124,8 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except: pass
-    return [{"name": "Lunes 保活任务", "script": "luneshost.py", "mode": "SB增强模式 (对应脚本: bypass_seleniumbase.py)", "email": "", "password": "", "freq": 3, "active": True, "last_run": "从未运行", "stay_time": 10, "refresh_count": 3, "refresh_interval": 5, "server_id": "52794", "proxy": "", "renew_id": ""}]
+    # ✨ 物理修改：取消默认注入 Lunes 任务模板，返回空列表
+    return []
 
 def save_config(tasks):
     bj_tz = timezone(timedelta(hours=8))
@@ -174,7 +175,7 @@ st.markdown("""
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
-# ✨ 物理修复：提前初始化 is_running 状态，防止 AttributeError
+# ✨ 物理修复：提前初始化 is_running 状态
 if 'is_running' not in st.session_state:
     st.session_state.is_running = False
 
@@ -192,7 +193,7 @@ if not st.session_state.authenticated:
             else: st.error("授权码错误。")
     st.stop()
 
-# ✨ 物理注入：设置每 30 秒自动刷新一次 UI，确保显示最新任务时间
+# ✨ 物理注入：设置每 30 秒自动刷新一次 UI
 if not st.session_state.is_running:
     st_autorefresh(interval=30000, key="data_refresh")
 
