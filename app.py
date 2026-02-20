@@ -7,7 +7,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 from huggingface_hub import hf_hub_download, upload_file, delete_file
 from collections import deque
-# ✨ 唯一新增：引入自动刷新组件
+# ✨ 注入：引入自动刷新组件
 from streamlit_autorefresh import st_autorefresh
 
 # 配置文件路径锁定
@@ -174,6 +174,10 @@ st.markdown("""
 if 'authenticated' not in st.session_state:
     st.session_state.authenticated = False
 
+# ✨ 物理修复：提前初始化 is_running 状态，防止 AttributeError
+if 'is_running' not in st.session_state:
+    st.session_state.is_running = False
+
 current_access_code = load_auth()
 
 if not st.session_state.authenticated:
@@ -188,7 +192,7 @@ if not st.session_state.authenticated:
             else: st.error("授权码错误。")
     st.stop()
 
-# ✨ 唯一新增：设置每 30 秒自动刷新一次 UI，确保显示最新任务时间
+# ✨ 物理注入：设置每 30 秒自动刷新一次 UI，确保显示最新任务时间
 if not st.session_state.is_running:
     st_autorefresh(interval=30000, key="data_refresh")
 
@@ -200,9 +204,6 @@ if 'tasks' not in st.session_state:
 # ✨ 注入：由于自动刷新会重置逻辑，这里强制每一轮都重新加载最新磁盘配置
 if not st.session_state.is_running:
     st.session_state.tasks = load_config()
-
-if 'is_running' not in st.session_state:
-    st.session_state.is_running = False
 
 with st.sidebar:
     st.header("⚙️ 终端管理")
