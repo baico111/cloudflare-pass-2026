@@ -7,6 +7,8 @@ import requests
 from datetime import datetime, timedelta, timezone
 from huggingface_hub import hf_hub_download, upload_file, delete_file
 from collections import deque
+# ✨ 唯一新增：引入自动刷新组件
+from streamlit_autorefresh import st_autorefresh
 
 # 配置文件路径锁定
 OUTPUT_DIR = "/app/output"
@@ -186,9 +188,17 @@ if not st.session_state.authenticated:
             else: st.error("授权码错误。")
     st.stop()
 
+# ✨ 唯一新增：设置每 30 秒自动刷新一次 UI，确保显示最新任务时间
+if not st.session_state.is_running:
+    st_autorefresh(interval=30000, key="data_refresh")
+
 st.title("🛡️ 矩阵自动化控制内核")
 
 if 'tasks' not in st.session_state:
+    st.session_state.tasks = load_config()
+
+# ✨ 注入：由于自动刷新会重置逻辑，这里强制每一轮都重新加载最新磁盘配置
+if not st.session_state.is_running:
     st.session_state.tasks = load_config()
 
 if 'is_running' not in st.session_state:
