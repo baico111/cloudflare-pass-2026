@@ -8,8 +8,10 @@ apscheduler             # 建议增加：用于更稳定的定时任务调度逻
 
 # --- UI 面板与网络 ---
 streamlit>=1.30.0       # 构建高科技感管理后台
+streamlit-autorefresh   # ✨ 物理注入：实现 UI 面板自动重载以同步后台时间
 requests                # 用于 Telegram 消息推送及 API 调用
-imaplib2                # 补强：确保 Gmail 验证码抓取更加稳定 (可选)
+imaplib2               
+# 补强：确保 Gmail 验证码抓取更加稳定 (可选)
 
 # --- Hugging Face 适配补充 (适配必须) ---
 huggingface-hub         # 核心：用于将配置文件同步到数据集 (Dataset)
